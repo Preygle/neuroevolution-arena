@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "behavior-mutation-arena"
+version = "0.1.0"
+description = "Hybrid-ready multi-agent PPO and evolutionary arena simulator"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "torch>=2.2",
+  "pygame>=2.5",
+  "matplotlib>=3.8",
+]
+
+[tool.setuptools.packages.find]
+include = ["behavior_mutation_arena*"]
+
