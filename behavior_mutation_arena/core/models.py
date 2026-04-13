@@ -13,6 +13,9 @@ class AgentMetrics:
     survival_steps: int
     kills: int
     fitness: float
+    explored_cells: int = 0
+    damage_dealt: float = 0.0
+    camping_steps: int = 0
 
 
 @dataclass
@@ -34,4 +37,6 @@ class GenerationSummary:
     mean_kills: float
     champion_id: int
     elite_ids: list[int]
-
+    mean_exploration: float = 0.0
+    mean_damage: float = 0.0
+    mean_camping: float = 0.0

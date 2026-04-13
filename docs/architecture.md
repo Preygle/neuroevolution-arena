@@ -12,9 +12,11 @@ Owns the authoritative world state:
 
 - occupancy grid
 - item grid
+- terrain grid
 - agent positions
 - health, energy, weapon type, durability
 - cumulative reward, kill count, survival steps
+- exploration and camping state
 
 Its public contract is shaped like a native backend contract:
 
@@ -83,6 +85,15 @@ Scalar features:
 - weapon one-hot
 - normalized weapon durability
 
+## v1.1 learning changes
+
+- Fixed training map pool with curriculum-based map activation instead of fully unconstrained terrain randomness
+- Center-biased food and weapon placement to create repeatable conflict zones
+- Edge-biased spawn placement to force traversal through terrain
+- Exploration reward for new cells
+- Camping penalty for staying in the same local radius too long, with stronger penalty in corners
+- Fitness rebalanced away from double-counting pure survival
+
 ## Native backend migration
 
 The clean migration path is:
@@ -95,4 +106,3 @@ The clean migration path is:
    - attack targeting and damage application
    - observation encoding
    - bulk reset/spawn logic
-

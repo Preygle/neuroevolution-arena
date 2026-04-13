@@ -70,6 +70,8 @@ class ArenaSimulation:
         completed_generations = self.start_generation
         try:
             for generation in range(self.start_generation, generations):
+                if hasattr(self.environment, "set_generation"):
+                    self.environment.set_generation(generation)
                 observations = self.environment.reset(seed=self.seed + generation)
                 buffers = [RolloutBuffer() for _ in range(self.config.population_size)]
                 frames: list[dict[str, np.ndarray | int]] = [self.environment.snapshot()]
@@ -113,6 +115,9 @@ class ArenaSimulation:
                 rewards = np.asarray([metric.reward for metric in metrics], dtype=np.float32)
                 survival = np.asarray([metric.survival_steps for metric in metrics], dtype=np.float32)
                 kills = np.asarray([metric.kills for metric in metrics], dtype=np.float32)
+                exploration = np.asarray([metric.explored_cells for metric in metrics], dtype=np.float32)
+                damage = np.asarray([metric.damage_dealt for metric in metrics], dtype=np.float32)
+                camping = np.asarray([metric.camping_steps for metric in metrics], dtype=np.float32)
                 champion_id = int(np.argmax(fitness))
                 summary = GenerationSummary(
                     generation=generation,
@@ -123,6 +128,9 @@ class ArenaSimulation:
                     mean_kills=float(kills.mean()),
                     champion_id=champion_id,
                     elite_ids=elite_ids,
+                    mean_exploration=float(exploration.mean()),
+                    mean_damage=float(damage.mean()),
+                    mean_camping=float(camping.mean()),
                 )
                 self.history.append(summary)
 
@@ -167,6 +175,9 @@ class ArenaSimulation:
                     "mean_reward",
                     "mean_survival",
                     "mean_kills",
+                    "mean_exploration",
+                    "mean_damage",
+                    "mean_camping",
                     "champion_id",
                     "elite_ids",
                 ]
@@ -180,6 +191,9 @@ class ArenaSimulation:
                         row.mean_reward,
                         row.mean_survival,
                         row.mean_kills,
+                        row.mean_exploration,
+                        row.mean_damage,
+                        row.mean_camping,
                         row.champion_id,
                         " ".join(str(elite_id) for elite_id in row.elite_ids),
                     ]
@@ -217,7 +231,22 @@ class ArenaSimulation:
 
         self.policy_bank.load_population(population_states)
         self.policy_bank.load_optimizer_states(optimizer_states)
-        self.history = [GenerationSummary(**row) for row in history_rows]
+        self.history = [
+            GenerationSummary(
+                generation=row["generation"],
+                best_fitness=row["best_fitness"],
+                mean_fitness=row["mean_fitness"],
+                mean_reward=row["mean_reward"],
+                mean_survival=row["mean_survival"],
+                mean_kills=row["mean_kills"],
+                champion_id=row["champion_id"],
+                elite_ids=row["elite_ids"],
+                mean_exploration=row.get("mean_exploration", 0.0),
+                mean_damage=row.get("mean_damage", 0.0),
+                mean_camping=row.get("mean_camping", 0.0),
+            )
+            for row in history_rows
+        ]
         self.best_fitness = float(checkpoint.get("best_fitness", float("-inf")))
         self.start_generation = completed_generations
 

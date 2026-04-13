@@ -26,6 +26,9 @@ def main() -> None:
                     mean_kills=float(row["mean_kills"]),
                     champion_id=int(row["champion_id"]),
                     elite_ids=[int(value) for value in row["elite_ids"].split() if value],
+                    mean_exploration=float(row.get("mean_exploration", 0.0)),
+                    mean_damage=float(row.get("mean_damage", 0.0)),
+                    mean_camping=float(row.get("mean_camping", 0.0)),
                 )
             )
     plot_training_metrics(history, "artifacts/plots/training_metrics.png")

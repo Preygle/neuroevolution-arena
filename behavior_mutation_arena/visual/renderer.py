@@ -10,6 +10,7 @@ from behavior_mutation_arena.config import ArenaConfig, ItemKind, WeaponKind
 CELL_BACKGROUND = (24, 28, 34)
 GRID_LINE = (58, 66, 78)
 TEXT_COLOR = (235, 239, 245)
+WALL_COLOR = (64, 72, 86)
 ITEM_COLORS = {
     ItemKind.FOOD: (60, 179, 113),
     ItemKind.POISON: (205, 92, 92),
@@ -47,6 +48,7 @@ class ArenaRenderer:
 
         self.screen.fill((14, 18, 22))
         item_grid = snapshot["item_grid"]
+        terrain_grid = snapshot.get("terrain_grid")
         positions = snapshot["positions"]
         alive = snapshot["alive"]
         health = snapshot["health"]
@@ -54,6 +56,8 @@ class ArenaRenderer:
         weapon_kind = snapshot["weapon_kind"]
         kills = snapshot["kills"]
         rewards = snapshot["reward"]
+        explored = snapshot.get("explored_cells")
+        camping = snapshot.get("camping_steps")
 
         for x in range(self.config.grid_size):
             for y in range(self.config.grid_size):
@@ -63,7 +67,8 @@ class ArenaRenderer:
                     self.cell_size,
                     self.cell_size,
                 )
-                pygame.draw.rect(self.screen, CELL_BACKGROUND, rect)
+                cell_color = WALL_COLOR if terrain_grid is not None and terrain_grid[x, y] else CELL_BACKGROUND
+                pygame.draw.rect(self.screen, cell_color, rect)
                 pygame.draw.rect(self.screen, GRID_LINE, rect, width=1)
                 item = ItemKind(int(item_grid[x, y]))
                 if item is not ItemKind.EMPTY:
@@ -98,12 +103,19 @@ class ArenaRenderer:
         lines = [
             f"Step: {snapshot['step']}/{snapshot['episode_step_limit']}",
             f"Alive: {int(sum(1 for flag in alive if flag))}",
+            f"Map: {snapshot.get('map_name', 'unknown')}",
         ]
         if overlay_lines:
             lines.extend(overlay_lines)
         top_agents = sorted(
             [
-                (float(rewards[idx]), int(kills[idx]), idx)
+                (
+                    float(rewards[idx]),
+                    int(kills[idx]),
+                    int(explored[idx]) if explored is not None else 0,
+                    -(int(camping[idx]) if camping is not None else 0),
+                    idx,
+                )
                 for idx in range(self.config.population_size)
                 if alive[idx]
             ],
@@ -111,8 +123,11 @@ class ArenaRenderer:
         )[:8]
         lines.append("")
         lines.append("Top live agents")
-        for reward, kill_count, agent_id in top_agents:
-            lines.append(f"A{agent_id:02d}  R {reward:6.1f}  K {kill_count}")
+        for reward, kill_count, explored_cells, camping_rank, agent_id in top_agents:
+            camping_steps = -camping_rank
+            lines.append(
+                f"A{agent_id:02d}  R {reward:6.1f}  K {kill_count}  E {explored_cells:02d}  C {camping_steps:02d}"
+            )
 
         y_offset = 60
         for line in lines:
@@ -137,4 +152,3 @@ class ArenaRenderer:
 
     def close(self) -> None:
         pygame.quit()
-

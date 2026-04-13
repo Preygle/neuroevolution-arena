@@ -2,6 +2,8 @@
 
 Behavior Mutation Arena is a modular multi-agent reinforcement learning sandbox built around a 15x15 combat-and-foraging grid. The current implementation is a runnable Python-first baseline with a clean backend seam for a future pybind11 C++ environment core, while keeping PPO and evolutionary logic in Python.
 
+This branch includes the `v1.1` learning-focused environment changes: fixed-map curriculum, structured terrain, center-biased resource placement, exploration reward, and anti-camping penalties.
+
 ## Project structure
 
 ```text
@@ -55,16 +57,19 @@ The environment core is intentionally separated behind `interface.backend.build_
 ## Current feature set
 
 - 30 agents per generation on a 15x15 grid
-- Random episode length between 100 and 300 steps
+- Fixed-length 180-step episodes by default for lower rollout variance
 - Food, poison, melee, ranged, and rare weapon pickups
+- Structured terrain map pool with curriculum-based rotation
+- Edge-biased spawn zones and center-biased contested resources
 - Health, energy, inventory, durability, kills, reward, and survival tracking
+- Exploration and camping metrics used during selection
 - Accurate 3x3 observation window
 - Noisy 5x5 observation window with configurable accuracy
 - PPO updates during each generation
 - Evolutionary replacement after each generation using elite selection and Gaussian mutation
 - Live Pygame visualization
 - Best-agent replay capture
-- Fitness, survival, and kill-count plotting
+- Fitness, survival, kill, exploration, and camping plotting
 
 ## Run
 
@@ -78,6 +83,12 @@ Run training:
 
 ```powershell
 python scripts/train.py --generations 20
+```
+
+Resume automatically from the latest progress checkpoint unless you explicitly start over:
+
+```powershell
+python scripts/train.py --generations 1000 --scratch
 ```
 
 Run with live rendering:
@@ -98,6 +109,12 @@ Rebuild plots from CSV:
 python scripts/plot_metrics.py
 ```
 
+Evaluate the saved champion across the full fixed map pool:
+
+```powershell
+python scripts/evaluate_checkpoint.py --episodes-per-map 2
+```
+
 Artifacts are written to:
 
 - `artifacts/checkpoints/best_policy.pt`
@@ -111,4 +128,3 @@ Artifacts are written to:
 - Move hot loops in `core.environment` into a pybind11 backend once rollout throughput becomes the bottleneck.
 - Batch policy inference by population, or shard population members across vectorized arenas.
 - Keep PPO in Python and only expose `reset`, `step`, `observe`, and `snapshot` from the native backend.
-
