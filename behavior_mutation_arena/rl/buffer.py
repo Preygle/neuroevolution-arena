@@ -13,6 +13,20 @@ class RolloutBatch:
     returns: np.ndarray
     advantages: np.ndarray
 
+    @staticmethod
+    def concatenate(batches: list["RolloutBatch"]) -> "RolloutBatch" | None:
+        if not batches:
+            return None
+        if len(batches) == 1:
+            return batches[0]
+        return RolloutBatch(
+            observations=np.concatenate([batch.observations for batch in batches], axis=0),
+            actions=np.concatenate([batch.actions for batch in batches], axis=0),
+            log_probs=np.concatenate([batch.log_probs for batch in batches], axis=0),
+            returns=np.concatenate([batch.returns for batch in batches], axis=0),
+            advantages=np.concatenate([batch.advantages for batch in batches], axis=0),
+        )
+
 
 class RolloutBuffer:
     def __init__(self) -> None:
@@ -72,4 +86,3 @@ class RolloutBuffer:
 
     def __len__(self) -> int:
         return len(self.actions)
-

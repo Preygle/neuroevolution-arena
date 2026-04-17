@@ -13,10 +13,12 @@ from behavior_mutation_arena.interface.api import ArenaSimulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train Behavior Mutation Arena agents.")
+    parser = argparse.ArgumentParser(description="Train the cooperative dungeon crawler team.")
     parser.add_argument("--generations", type=int, default=20)
     parser.add_argument("--backend", choices=["python", "native"], default="python")
     parser.add_argument("--render", action="store_true")
+    parser.add_argument("--instances", type=int, default=1)
+    parser.add_argument("--render-instances", type=int, default=None)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--scratch", action="store_true")
@@ -28,6 +30,24 @@ def main() -> None:
     args = build_parser().parse_args()
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     config = ArenaConfig(seed=args.seed, device=device)
+    requested_instances = max(1, args.instances)
+    if requested_instances > config.max_instance_count:
+        print(
+            f"requested instances={requested_instances} exceeds safe cap={config.max_instance_count}; "
+            f"using {config.max_instance_count}"
+        )
+    config.instance_count = min(requested_instances, config.max_instance_count)
+    requested_render_instances = (
+        args.render_instances
+        if args.render_instances is not None
+        else min(config.instance_count, config.default_render_instance_count)
+    )
+    if requested_render_instances > config.max_render_instance_count:
+        print(
+            f"requested render instances={requested_render_instances} exceeds safe cap={config.max_render_instance_count}; "
+            f"using {config.max_render_instance_count}"
+        )
+    config.max_render_instance_count = max(1, min(requested_render_instances, config.max_render_instance_count))
     simulation = ArenaSimulation(
         config=config,
         backend=args.backend,

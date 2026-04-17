@@ -23,12 +23,14 @@ def main() -> None:
                     mean_fitness=float(row["mean_fitness"]),
                     mean_reward=float(row["mean_reward"]),
                     mean_survival=float(row["mean_survival"]),
-                    mean_kills=float(row["mean_kills"]),
+                    mean_floor_reached=float(row["mean_floor_reached"]),
+                    mean_bosses_defeated=float(row["mean_bosses_defeated"]),
+                    mean_chests_opened=float(row["mean_chests_opened"]),
+                    mean_damage=float(row["mean_damage"]),
+                    mean_gate_distance=float(row.get("mean_gate_distance", 0.0)),
+                    success_rate=float(row["success_rate"]),
                     champion_id=int(row["champion_id"]),
                     elite_ids=[int(value) for value in row["elite_ids"].split() if value],
-                    mean_exploration=float(row.get("mean_exploration", 0.0)),
-                    mean_damage=float(row.get("mean_damage", 0.0)),
-                    mean_camping=float(row.get("mean_camping", 0.0)),
                 )
             )
     plot_training_metrics(history, "artifacts/plots/training_metrics.png")

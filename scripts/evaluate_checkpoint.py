@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import statistics as stats
 import sys
+from dataclasses import fields
 from pathlib import Path
 
 import numpy as np
@@ -15,20 +16,25 @@ from behavior_mutation_arena.core.environment import ArenaEnvironment
 from behavior_mutation_arena.rl.policy import ActorCriticPolicy
 
 
+def config_from_checkpoint(payload: dict[str, object]) -> ArenaConfig:
+    checkpoint_config = payload.get("config", {})
+    allowed_fields = {field.name for field in fields(ArenaConfig)}
+    filtered_config = {
+        key: value for key, value in checkpoint_config.items() if key in allowed_fields
+    }
+    return ArenaConfig(**filtered_config)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Evaluate a saved champion checkpoint across the map pool.")
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        default="artifacts/checkpoints/best_policy.pt",
-    )
-    parser.add_argument("--episodes-per-map", type=int, default=2)
+    parser = argparse.ArgumentParser(description="Evaluate a saved checkpoint on the fixed dungeon campaign.")
+    parser.add_argument("--checkpoint", type=str, default="artifacts/checkpoints/best_policy.pt")
+    parser.add_argument("--episodes", type=int, default=3)
     parser.add_argument("--device", type=str, default=None)
     return parser
 
 
 def greedy_actions(policy: ActorCriticPolicy, observations: np.ndarray, alive: np.ndarray, device: torch.device) -> np.ndarray:
-    actions = np.full(observations.shape[0], 4, dtype=np.int64)
+    actions = np.full(observations.shape[0], 11, dtype=np.int64)
     for agent_id in np.flatnonzero(alive):
         obs_tensor = torch.from_numpy(observations[agent_id]).float().unsqueeze(0).to(device)
         with torch.no_grad():
@@ -40,44 +46,54 @@ def greedy_actions(policy: ActorCriticPolicy, observations: np.ndarray, alive: n
 def main() -> None:
     args = build_parser().parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    config = ArenaConfig(**checkpoint.get("config", {}))
+    config = config_from_checkpoint(checkpoint)
     device = torch.device(args.device or config.device)
+    if config.environment_name != "dungeon_crawler_training_v1":
+        raise SystemExit(
+            "checkpoint environment does not match the dungeon crawler branch; "
+            "train a new checkpoint or pass a dungeon checkpoint explicitly"
+        )
     policy = ActorCriticPolicy(config.observation_dim, config.action_size, config.hidden_size).to(device)
-    policy.load_state_dict(checkpoint["policy_state"])
+    try:
+        policy.load_state_dict(checkpoint["policy_state"])
+    except RuntimeError as exc:
+        raise SystemExit(
+            "checkpoint policy shape does not match the current dungeon config; "
+            "train a fresh checkpoint for this branch"
+        ) from exc
     policy.eval()
     env = ArenaEnvironment(config)
 
-    for map_index, arena_map in enumerate(env.map_pool):
-        map_rewards: list[float] = []
-        map_survival: list[float] = []
-        map_kills: list[float] = []
-        map_exploration: list[float] = []
-        map_camping: list[float] = []
+    rewards: list[float] = []
+    floor_reached: list[float] = []
+    bosses: list[float] = []
+    chests: list[float] = []
+    gate_distance: list[float] = []
+    victories: list[float] = []
 
-        for episode in range(args.episodes_per_map):
-            env.set_forced_map_index(map_index)
-            observations = env.reset(seed=config.seed + map_index * 100 + episode)
-            done = False
-            while not done:
-                actions = greedy_actions(policy, observations, env.alive.copy(), device)
-                step_batch = env.step(actions)
-                observations = step_batch.observations
-                done = bool(step_batch.info["episode_done"])
-            metrics = env.get_agent_metrics()
-            map_rewards.append(stats.mean(metric.reward for metric in metrics))
-            map_survival.append(stats.mean(metric.survival_steps for metric in metrics))
-            map_kills.append(stats.mean(metric.kills for metric in metrics))
-            map_exploration.append(stats.mean(metric.explored_cells for metric in metrics))
-            map_camping.append(stats.mean(metric.camping_steps for metric in metrics))
+    for episode in range(args.episodes):
+        observations = env.reset(seed=config.seed + episode)
+        done = False
+        while not done:
+            actions = greedy_actions(policy, observations, env.alive.copy(), device)
+            step_batch = env.step(actions)
+            observations = step_batch.observations
+            done = bool(step_batch.info["episode_done"])
+        metrics = env.get_agent_metrics()
+        rewards.append(stats.mean(metric.reward for metric in metrics))
+        floor_reached.append(stats.mean(metric.floor_reached for metric in metrics))
+        bosses.append(stats.mean(metric.bosses_defeated for metric in metrics))
+        chests.append(stats.mean(metric.chests_opened for metric in metrics))
+        gate_distance.append(stats.mean(metric.gate_distance for metric in metrics))
+        victories.append(stats.mean(metric.victory for metric in metrics))
 
-        print(
-            f"{arena_map.name:14s} "
-            f"reward={stats.mean(map_rewards):7.2f} "
-            f"survival={stats.mean(map_survival):6.2f} "
-            f"kills={stats.mean(map_kills):5.2f} "
-            f"explore={stats.mean(map_exploration):6.2f} "
-            f"camp={stats.mean(map_camping):6.2f}"
-        )
+    print(f"episodes={args.episodes}")
+    print(f"reward={stats.mean(rewards):.2f}")
+    print(f"floor_reached={stats.mean(floor_reached):.2f}")
+    print(f"bosses_defeated={stats.mean(bosses):.2f}")
+    print(f"chests_opened={stats.mean(chests):.2f}")
+    print(f"gate_distance={stats.mean(gate_distance):.2f}")
+    print(f"victory_rate={stats.mean(victories):.2f}")
 
 
 if __name__ == "__main__":

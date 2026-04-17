@@ -11,11 +11,13 @@ class AgentMetrics:
     agent_id: int
     reward: float
     survival_steps: int
-    kills: int
+    floor_reached: int
+    bosses_defeated: int
+    chests_opened: int
+    damage_dealt: float
+    gate_distance: float
     fitness: float
-    explored_cells: int = 0
-    damage_dealt: float = 0.0
-    camping_steps: int = 0
+    victory: int = 0
 
 
 @dataclass
@@ -34,9 +36,11 @@ class GenerationSummary:
     mean_fitness: float
     mean_reward: float
     mean_survival: float
-    mean_kills: float
+    mean_floor_reached: float
+    mean_bosses_defeated: float
+    mean_chests_opened: float
+    mean_damage: float
+    mean_gate_distance: float
+    success_rate: float
     champion_id: int
     elite_ids: list[int]
-    mean_exploration: float = 0.0
-    mean_damage: float = 0.0
-    mean_camping: float = 0.0

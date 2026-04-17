@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Iterable
+from dataclasses import dataclass
 
 import numpy as np
 
 from behavior_mutation_arena.config import (
     Action,
     ArenaConfig,
-    ITEM_TO_WEAPON,
-    ItemKind,
-    WEAPON_STATS,
-    WeaponKind,
+    ENEMY_STATS,
+    EnemyKind,
+    POWERUP_STATS,
+    PowerUpType,
 )
-from behavior_mutation_arena.core.map_pool import ArenaMap, build_training_map_pool
+from behavior_mutation_arena.core.dungeon_floors import ChestSpawn, DungeonFloor, EnemySpawn, build_dungeon_floors
 from behavior_mutation_arena.core.models import AgentMetrics, StepBatch
 
 
@@ -21,7 +21,19 @@ MOVE_DELTAS = {
     Action.MOVE_DOWN: (1, 0),
     Action.MOVE_LEFT: (0, -1),
     Action.MOVE_RIGHT: (0, 1),
+    Action.MOVE_UP_LEFT: (-1, -1),
+    Action.MOVE_UP_RIGHT: (-1, 1),
+    Action.MOVE_DOWN_LEFT: (1, -1),
+    Action.MOVE_DOWN_RIGHT: (1, 1),
 }
+
+
+@dataclass
+class EnemyState:
+    kind: EnemyKind
+    position: tuple[int, int]
+    health: float
+    alive: bool = True
 
 
 class ArenaEnvironment:
@@ -30,36 +42,44 @@ class ArenaEnvironment:
         self.rng = np.random.default_rng(seed if seed is not None else config.seed)
         self.grid_size = config.grid_size
         self.population_size = config.population_size
-        self.map_pool = build_training_map_pool(self.grid_size)
+        self.floors = build_dungeon_floors(self.grid_size)
         self.current_generation = 0
-        self.current_map = self.map_pool[0]
-        self.forced_map_index: int | None = None
-        self.occupancy = np.full((self.grid_size, self.grid_size), -1, dtype=np.int16)
-        self.item_grid = np.full((self.grid_size, self.grid_size), ItemKind.EMPTY, dtype=np.int8)
-        self.terrain_grid = np.zeros((self.grid_size, self.grid_size), dtype=bool)
+        self.current_floor_index = 0
+        self.current_floor = self.floors[0]
         self.positions = np.zeros((self.population_size, 2), dtype=np.int16)
         self.alive = np.ones(self.population_size, dtype=bool)
         self.health = np.full(self.population_size, config.initial_health, dtype=np.float32)
         self.energy = np.full(self.population_size, config.initial_energy, dtype=np.float32)
-        self.weapon_kind = np.full(self.population_size, WeaponKind.NONE, dtype=np.int8)
-        self.weapon_durability = np.zeros(self.population_size, dtype=np.float32)
-        self.total_reward = np.zeros(self.population_size, dtype=np.float32)
-        self.kills = np.zeros(self.population_size, dtype=np.int16)
         self.damage_dealt = np.zeros(self.population_size, dtype=np.float32)
+        self.total_reward = np.zeros(self.population_size, dtype=np.float32)
         self.survival_steps = np.zeros(self.population_size, dtype=np.int16)
-        self.explored_cells = np.zeros(self.population_size, dtype=np.int16)
-        self.camping_steps = np.zeros(self.population_size, dtype=np.int16)
-        self.camping_streak = np.zeros(self.population_size, dtype=np.int16)
-        self.anchor_positions = np.zeros((self.population_size, 2), dtype=np.int16)
-        self.visited_cells = np.zeros((self.population_size, self.grid_size, self.grid_size), dtype=bool)
         self.current_step = 0
         self.episode_step_limit = config.episode_steps_min
+        self.attack_bonus = 0.0
+        self.range_bonus = 0.0
+        self.speed_bonus = 0
+        self.vitality_bonus = 0.0
+        self.diagonal_unlocked = False
+        self.floors_cleared = 0
+        self.max_floor_reached = 1
+        self.bosses_defeated = 0
+        self.chests_opened = 0
+        self.victory = False
+        self.gate_open = True
+        self.chest_lookup: dict[tuple[int, int], PowerUpType] = {}
+        self.enemy_states: list[EnemyState] = []
+        self.team_wiped = False
+        self.stalled_out = False
+        self.steps_since_progress = 0
+        self.closest_gate_distance = 0
+        self.closest_chest_distance = -1
+        self.closest_boss_distance = -1
+        self.best_gate_distance = 0
+        self.best_chest_distance = -1
+        self.best_boss_distance = -1
 
     def set_generation(self, generation: int) -> None:
         self.current_generation = generation
-
-    def set_forced_map_index(self, map_index: int | None) -> None:
-        self.forced_map_index = map_index
 
     def reset(self, seed: int | None = None) -> np.ndarray:
         if seed is not None:
@@ -68,27 +88,28 @@ class ArenaEnvironment:
         self.episode_step_limit = int(
             self.rng.integers(self.config.episode_steps_min, self.config.episode_steps_max + 1)
         )
-        self.current_map = self._select_map()
-        self.terrain_grid = self.current_map.terrain.copy()
-        self.occupancy.fill(-1)
-        self.item_grid.fill(ItemKind.EMPTY)
+        self.current_floor_index = 0
+        self.current_floor = self.floors[0]
         self.alive.fill(True)
         self.health.fill(self.config.initial_health)
         self.energy.fill(self.config.initial_energy)
-        self.weapon_kind.fill(WeaponKind.NONE)
-        self.weapon_durability.fill(0.0)
-        self.total_reward.fill(0.0)
-        self.kills.fill(0)
         self.damage_dealt.fill(0.0)
+        self.total_reward.fill(0.0)
         self.survival_steps.fill(0)
-        self.explored_cells.fill(0)
-        self.camping_steps.fill(0)
-        self.camping_streak.fill(0)
-        self.visited_cells.fill(False)
-        self._spawn_agents()
-        self.anchor_positions[:] = self.positions
-        self._mark_initial_exploration()
-        self._spawn_initial_items()
+        self.attack_bonus = 0.0
+        self.range_bonus = 0.0
+        self.speed_bonus = 0
+        self.vitality_bonus = 0.0
+        self.diagonal_unlocked = False
+        self.floors_cleared = 0
+        self.max_floor_reached = 1
+        self.bosses_defeated = 0
+        self.chests_opened = 0
+        self.victory = False
+        self.team_wiped = False
+        self.stalled_out = False
+        self.steps_since_progress = 0
+        self._load_floor(self.current_floor_index, preserve_team_state=False)
         return self.observe_all()
 
     def observe_all(self) -> np.ndarray:
@@ -99,300 +120,405 @@ class ArenaEnvironment:
         rewards = np.zeros(self.population_size, dtype=np.float32)
         terminated = np.zeros(self.population_size, dtype=bool)
         truncated = np.zeros(self.population_size, dtype=bool)
+        previous_damage = float(self.damage_dealt.sum())
+        previous_chests = self.chests_opened
+        previous_bosses = self.bosses_defeated
+        previous_floors_cleared = self.floors_cleared
+        previous_victory = self.victory
 
         self.current_step += 1
         active_mask = self.alive.copy()
         self.survival_steps[active_mask] += 1
-        rewards[active_mask] += self.config.survival_reward
-        self.total_reward[active_mask] += self.config.survival_reward
-        self.energy[active_mask] -= self.config.step_energy_cost
-        starving = active_mask & (self.energy <= 0.0)
-        self.health[starving] -= self.config.starvation_damage
+        rewards[active_mask] += self.config.step_penalty
+        self.total_reward[active_mask] += self.config.step_penalty
 
-        self._resolve_moves(actions)
-        self._apply_exploration_reward(rewards, active_mask)
-        self._apply_camping_penalty(rewards, active_mask)
-        self._resolve_pickups(actions, rewards)
-        terminated |= self._eliminate_dead_agents()
-        self._resolve_attacks(actions, rewards, terminated)
-        terminated |= self._eliminate_dead_agents()
+        floor_transition = self._resolve_agent_actions(actions, rewards)
+        self._apply_tile_effects(rewards)
 
-        episode_done = self.current_step >= self.episode_step_limit or not self.alive.any()
-        if episode_done:
+        if not floor_transition and not self.victory:
+            self._resolve_enemy_turn(rewards)
+
+        death_mask = self.alive & (self.health <= 0.0)
+        if death_mask.any():
+            self._handle_agent_deaths(death_mask, rewards, terminated)
+
+        progress_made = self._apply_distance_shaping(
+            rewards,
+            previous_damage=previous_damage,
+            previous_chests=previous_chests,
+            previous_bosses=previous_bosses,
+            previous_floors_cleared=previous_floors_cleared,
+            previous_victory=previous_victory,
+            floor_transition=floor_transition,
+        )
+        if progress_made:
+            self.steps_since_progress = 0
+        else:
+            self.steps_since_progress += 1
+            if self.steps_since_progress % self.config.no_progress_penalty_interval == 0:
+                self._add_team_reward(rewards, self.config.no_progress_penalty)
+
+        episode_done = False
+        if not self.alive.any():
+            self.team_wiped = True
+            self._add_team_reward(rewards, self.config.team_wipe_penalty)
+            episode_done = True
+            truncated[:] = False
+        elif self.victory:
+            episode_done = True
             truncated |= self.alive
+        elif self.steps_since_progress >= self.config.no_progress_patience:
+            self.stalled_out = True
+            self._add_team_reward(rewards, self.config.no_progress_termination_penalty)
+            episode_done = True
+            truncated |= self.alive
+        elif self.current_step >= self.episode_step_limit:
+            episode_done = True
+            truncated |= self.alive
+
         observations = self.observe_all()
         info = {
             "episode_done": episode_done,
             "alive_count": int(self.alive.sum()),
             "current_step": self.current_step,
             "episode_step_limit": self.episode_step_limit,
-            "map_name": self.current_map.name,
+            "floor_index": self.current_floor_index + 1,
+            "floor_name": self.current_floor.name,
+            "bosses_defeated": self.bosses_defeated,
+            "chests_opened": self.chests_opened,
+            "victory": self.victory,
+            "gate_open": self.gate_open,
+            "closest_gate_distance": self.closest_gate_distance,
+            "closest_chest_distance": self.closest_chest_distance,
+            "closest_boss_distance": self.closest_boss_distance,
+            "steps_since_progress": self.steps_since_progress,
+            "stalled_out": self.stalled_out,
         }
         return StepBatch(observations, rewards, terminated, truncated, info)
 
-    def snapshot(self) -> dict[str, np.ndarray | int | str]:
+    def snapshot(self) -> dict[str, object]:
+        chest_grid = np.zeros((self.grid_size, self.grid_size), dtype=np.int8)
+        for (x, y), powerup in self.chest_lookup.items():
+            chest_grid[x, y] = int(powerup) + 1
+        enemy_positions = np.asarray([enemy.position for enemy in self.enemy_states if enemy.alive], dtype=np.int16)
+        enemy_kind = np.asarray([int(enemy.kind) for enemy in self.enemy_states if enemy.alive], dtype=np.int8)
+        enemy_health = np.asarray([enemy.health for enemy in self.enemy_states if enemy.alive], dtype=np.float32)
         return {
             "step": self.current_step,
             "episode_step_limit": self.episode_step_limit,
-            "map_name": self.current_map.name,
-            "item_grid": self.item_grid.copy(),
-            "terrain_grid": self.terrain_grid.copy(),
+            "floor_index": self.current_floor_index + 1,
+            "floor_name": self.current_floor.name,
+            "theme": self.current_floor.theme,
+            "terrain_grid": self.current_floor.terrain.copy(),
+            "slow_tiles": self.current_floor.slow_tiles.copy(),
+            "hazard_tiles": self.current_floor.hazard_tiles.copy(),
+            "heal_tiles": self.current_floor.heal_tiles.copy(),
+            "gate_position": np.asarray(self.current_floor.gate_position, dtype=np.int16),
+            "gate_open": self.gate_open,
+            "chest_grid": chest_grid,
+            "enemy_positions": enemy_positions,
+            "enemy_kind": enemy_kind,
+            "enemy_health": enemy_health,
             "positions": self.positions.copy(),
             "alive": self.alive.copy(),
             "health": self.health.copy(),
             "energy": self.energy.copy(),
-            "weapon_kind": self.weapon_kind.copy(),
-            "weapon_durability": self.weapon_durability.copy(),
             "reward": self.total_reward.copy(),
-            "kills": self.kills.copy(),
-            "explored_cells": self.explored_cells.copy(),
-            "camping_steps": self.camping_steps.copy(),
+            "effective_max_health": self._effective_max_health(),
+            "attack_bonus": self.attack_bonus,
+            "range_bonus": self.range_bonus,
+            "speed_bonus": self.speed_bonus,
+            "diagonal_unlocked": self.diagonal_unlocked,
+            "bosses_defeated": self.bosses_defeated,
+            "chests_opened": self.chests_opened,
+            "floors_cleared": self.floors_cleared,
+            "victory": self.victory,
+            "closest_gate_distance": self.closest_gate_distance,
+            "closest_chest_distance": self.closest_chest_distance,
+            "closest_boss_distance": self.closest_boss_distance,
+            "steps_since_progress": self.steps_since_progress,
+            "stalled_out": self.stalled_out,
         }
 
     def get_agent_metrics(self) -> list[AgentMetrics]:
         metrics: list[AgentMetrics] = []
         for agent_id in range(self.population_size):
             reward = float(self.total_reward[agent_id])
-            survival = int(self.survival_steps[agent_id])
-            kills = int(self.kills[agent_id])
-            explored = int(self.explored_cells[agent_id])
-            damage = float(self.damage_dealt[agent_id])
-            camping = int(self.camping_steps[agent_id])
             fitness = (
                 reward
-                + kills * self.config.fitness_kill_weight
-                + damage * self.config.fitness_damage_weight
-                + explored * self.config.fitness_exploration_weight
-                - camping * self.config.fitness_camping_weight
+                + self.floors_cleared * self.config.floor_progress_weight
+                + self.bosses_defeated * self.config.boss_weight
+                + self.chests_opened * self.config.chest_weight
+                + float(self.damage_dealt[agent_id]) * self.config.damage_weight
+                + int(self.survival_steps[agent_id]) * self.config.survival_weight
+                + int(self.victory) * self.config.victory_weight
             )
             metrics.append(
                 AgentMetrics(
                     agent_id=agent_id,
                     reward=reward,
-                    survival_steps=survival,
-                    kills=kills,
+                    survival_steps=int(self.survival_steps[agent_id]),
+                    floor_reached=self.max_floor_reached,
+                    bosses_defeated=self.bosses_defeated,
+                    chests_opened=self.chests_opened,
+                    damage_dealt=float(self.damage_dealt[agent_id]),
+                    gate_distance=float(self.closest_gate_distance),
                     fitness=float(fitness),
-                    explored_cells=explored,
-                    damage_dealt=damage,
-                    camping_steps=camping,
+                    victory=int(self.victory),
                 )
             )
         return metrics
 
-    def _select_map(self) -> ArenaMap:
-        if self.forced_map_index is not None:
-            return self.map_pool[self.forced_map_index % len(self.map_pool)]
-        initial = min(self.config.curriculum_initial_map_count, len(self.map_pool))
-        full = min(self.config.curriculum_full_map_count, len(self.map_pool))
-        growth = max(1, self.config.curriculum_growth_generations)
-        if full <= initial:
-            active_count = full
-        else:
-            progress = min(1.0, self.current_generation / growth)
-            active_count = initial + int(round((full - initial) * progress))
-            active_count = max(initial, min(full, active_count))
-        return self.map_pool[self.current_generation % active_count]
+    def _resolve_agent_actions(self, actions: np.ndarray, rewards: np.ndarray) -> bool:
+        for agent_id, action_value in enumerate(actions):
+            if not self.alive[agent_id]:
+                continue
+            action = Action(int(action_value))
+            if action in MOVE_DELTAS:
+                self._move_agent(agent_id, action)
+            elif action is Action.ATTACK:
+                self._agent_attack(agent_id, rewards)
+            elif action is Action.OPEN_CHEST:
+                self._open_chest(agent_id, rewards)
+            elif action is Action.USE_GATE and self._use_gate(agent_id, rewards):
+                return True
+        return False
 
-    def _spawn_agents(self) -> None:
-        candidates = self._spawn_candidates()
-        if len(candidates) < self.population_size:
-            candidates = self._free_cells()
-        choice_indices = self.rng.permutation(len(candidates))[: self.population_size]
-        for agent_id, pick_index in enumerate(choice_indices):
-            x, y = candidates[pick_index]
-            self.positions[agent_id] = (x, y)
-            self.occupancy[x, y] = agent_id
-
-    def _spawn_candidates(self) -> np.ndarray:
-        band = max(1, self.config.spawn_band_width)
-        spawn_mask = np.zeros((self.grid_size, self.grid_size), dtype=bool)
-        spawn_mask[:band, :] = True
-        spawn_mask[-band:, :] = True
-        spawn_mask[:, :band] = True
-        spawn_mask[:, -band:] = True
-        return np.argwhere(spawn_mask & ~self.terrain_grid)
-
-    def _mark_initial_exploration(self) -> None:
-        for agent_id in range(self.population_size):
-            x, y = self.positions[agent_id]
-            self.visited_cells[agent_id, x, y] = True
-            self.explored_cells[agent_id] = 1
-
-    def _spawn_initial_items(self) -> None:
-        for item_kind, count in self.config.item_spawn_counts().items():
-            for _ in range(count):
-                self._spawn_item(item_kind)
-
-    def _spawn_item(self, item_kind: ItemKind) -> None:
-        candidates = self._preferred_item_cells(item_kind)
-        if len(candidates) == 0:
-            candidates = self._free_cells()
-        if len(candidates) == 0:
+    def _move_agent(self, agent_id: int, action: Action) -> None:
+        dx, dy = MOVE_DELTAS[action]
+        if dx != 0 and dy != 0 and not self.diagonal_unlocked:
             return
-        pick = candidates[self.rng.integers(0, len(candidates))]
-        self.item_grid[pick[0], pick[1]] = int(item_kind)
-
-    def _preferred_item_cells(self, item_kind: ItemKind) -> np.ndarray:
-        free_mask = self._free_mask()
-        coords = np.argwhere(free_mask)
-        if len(coords) == 0:
-            return coords
-        center = self.grid_size // 2
-        center_distance = np.abs(coords[:, 0] - center) + np.abs(coords[:, 1] - center)
-        center_radius = max(3, self.grid_size // 4)
-        edge_band = max(2, self.grid_size // 5)
-        edge_mask = (
-            (coords[:, 0] < edge_band)
-            | (coords[:, 1] < edge_band)
-            | (coords[:, 0] >= self.grid_size - edge_band)
-            | (coords[:, 1] >= self.grid_size - edge_band)
-        )
-        if item_kind in {ItemKind.FOOD, ItemKind.RARE_MELEE, ItemKind.RARE_RANGED}:
-            preferred = coords[center_distance <= center_radius]
-            if len(preferred) > 0:
-                return preferred
-        elif item_kind in {ItemKind.MELEE, ItemKind.RANGED}:
-            preferred = coords[(center_distance <= center_radius + 2) & ~edge_mask]
-            if len(preferred) > 0:
-                return preferred
-        elif item_kind is ItemKind.POISON:
-            preferred = coords[edge_mask]
-            if len(preferred) > 0:
-                return preferred
-        return coords
-
-    def _resolve_moves(self, actions: np.ndarray) -> None:
-        for agent_id in self.rng.permutation(self.population_size):
-            if not self.alive[agent_id]:
-                continue
-            action = Action(int(actions[agent_id]))
-            if action not in MOVE_DELTAS:
-                continue
-            dx, dy = MOVE_DELTAS[action]
-            x, y = self.positions[agent_id]
-            nx, ny = x + dx, y + dy
-            if not self._in_bounds(nx, ny):
-                continue
-            if self.terrain_grid[nx, ny]:
-                continue
-            if self.occupancy[nx, ny] != -1:
-                continue
-            self.occupancy[x, y] = -1
-            self.occupancy[nx, ny] = agent_id
+        steps = 1 + self.speed_bonus
+        for step_index in range(steps):
+            cost = self.config.diagonal_energy_cost if dx != 0 and dy != 0 else self.config.step_energy_cost
+            nx = int(self.positions[agent_id, 0] + dx)
+            ny = int(self.positions[agent_id, 1] + dy)
+            if not self._can_agent_enter(agent_id, nx, ny):
+                break
+            extra_cost = self.config.slow_tile_extra_cost if self.current_floor.slow_tiles[nx, ny] else 0.0
             self.positions[agent_id] = (nx, ny)
+            self.energy[agent_id] = max(0.0, self.energy[agent_id] - cost - extra_cost)
+            if self.current_floor.slow_tiles[nx, ny]:
+                break
+            if step_index == 0 and dx != 0 and dy != 0:
+                break
 
-    def _apply_exploration_reward(self, rewards: np.ndarray, active_mask: np.ndarray) -> None:
-        for agent_id in np.flatnonzero(active_mask):
-            x, y = self.positions[agent_id]
-            if self.visited_cells[agent_id, x, y]:
-                continue
-            self.visited_cells[agent_id, x, y] = True
-            self.explored_cells[agent_id] += 1
-            rewards[agent_id] += self.config.exploration_reward
-            self.total_reward[agent_id] += self.config.exploration_reward
-
-    def _apply_camping_penalty(self, rewards: np.ndarray, active_mask: np.ndarray) -> None:
-        for agent_id in np.flatnonzero(active_mask):
-            x, y = self.positions[agent_id]
-            ax, ay = self.anchor_positions[agent_id]
-            distance = abs(int(x) - int(ax)) + abs(int(y) - int(ay))
-            if distance <= self.config.camp_radius:
-                self.camping_streak[agent_id] += 1
+    def _agent_attack(self, agent_id: int, rewards: np.ndarray) -> None:
+        target_index = self._nearest_enemy_in_range(agent_id)
+        if target_index is None:
+            return
+        enemy = self.enemy_states[target_index]
+        stats = ENEMY_STATS[enemy.kind]
+        raw_damage = self.config.attack_base_damage + self.attack_bonus - stats.armor
+        damage = max(1.0, raw_damage)
+        enemy.health -= damage
+        self.damage_dealt[agent_id] += damage
+        self._add_team_reward(rewards, damage * self.config.attack_damage_reward_scale)
+        if enemy.health <= 0.0 and enemy.alive:
+            enemy.alive = False
+            if enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}:
+                self.bosses_defeated += 1
+                self.gate_open = True
+                bonus = self.config.final_boss_reward if enemy.kind is EnemyKind.FINAL_BOSS else self.config.mini_boss_reward
+                self._add_team_reward(rewards, bonus)
             else:
-                self.anchor_positions[agent_id] = (x, y)
-                self.camping_streak[agent_id] = 0
-            if self.camping_streak[agent_id] <= self.config.camp_threshold:
-                continue
-            penalty = self.config.camping_penalty
-            if self._is_corner_cell(int(x), int(y)):
-                penalty += self.config.corner_camping_penalty
-            rewards[agent_id] -= penalty
-            self.total_reward[agent_id] -= penalty
-            self.camping_steps[agent_id] += 1
+                self._add_team_reward(rewards, stats.reward)
 
-    def _resolve_pickups(self, actions: np.ndarray, rewards: np.ndarray) -> None:
-        for agent_id in self.rng.permutation(self.population_size):
+    def _open_chest(self, agent_id: int, rewards: np.ndarray) -> None:
+        position = tuple(int(value) for value in self.positions[agent_id])
+        powerup = self.chest_lookup.pop(position, None)
+        if powerup is None:
+            return
+        stats = POWERUP_STATS[powerup]
+        self.attack_bonus += stats.attack_bonus
+        self.range_bonus += stats.range_bonus
+        self.speed_bonus += stats.speed_bonus
+        self.diagonal_unlocked = self.diagonal_unlocked or stats.diagonal_unlocked
+        if stats.vitality_bonus > 0.0:
+            self.vitality_bonus += stats.vitality_bonus
+            self.health[self.alive] = np.minimum(self._effective_max_health(), self.health[self.alive] + stats.vitality_bonus)
+        self.chests_opened += 1
+        self._add_team_reward(rewards, self.config.chest_reward + stats.reward)
+
+    def _use_gate(self, agent_id: int, rewards: np.ndarray) -> bool:
+        position = tuple(int(value) for value in self.positions[agent_id])
+        if position != self.current_floor.gate_position or not self.gate_open:
+            return False
+        if self.current_floor_index == self.config.num_floors - 1:
+            self.victory = True
+            self.floors_cleared = self.config.num_floors
+            self.max_floor_reached = self.config.num_floors
+            self._add_team_reward(rewards, self.config.victory_reward + self.config.gate_reward)
+            return True
+        self.floors_cleared = max(self.floors_cleared, self.current_floor_index + 1)
+        self.max_floor_reached = max(self.max_floor_reached, self.current_floor_index + 2)
+        self._add_team_reward(
+            rewards,
+            self.config.gate_reward + self.config.floor_clear_reward * float(self.current_floor_index + 1),
+        )
+        self.current_floor_index += 1
+        self._load_floor(self.current_floor_index, preserve_team_state=True)
+        return True
+
+    def _apply_tile_effects(self, rewards: np.ndarray) -> None:
+        for agent_id in range(self.population_size):
             if not self.alive[agent_id]:
                 continue
-            if Action(int(actions[agent_id])) is not Action.PICK_ITEM:
-                continue
             x, y = self.positions[agent_id]
-            item_kind = ItemKind(int(self.item_grid[x, y]))
-            if item_kind is ItemKind.EMPTY:
-                continue
-            if item_kind is ItemKind.FOOD:
-                self.energy[agent_id] = min(self.config.max_energy, self.energy[agent_id] + self.config.food_energy)
-                rewards[agent_id] += self.config.food_reward
-                self.total_reward[agent_id] += self.config.food_reward
-            elif item_kind is ItemKind.POISON:
-                self.health[agent_id] -= self.config.poison_damage
-                rewards[agent_id] += self.config.poison_reward
-                self.total_reward[agent_id] += self.config.poison_reward
-            else:
-                weapon_kind = ITEM_TO_WEAPON[item_kind]
-                self.weapon_kind[agent_id] = int(weapon_kind)
-                self.weapon_durability[agent_id] = WEAPON_STATS[weapon_kind].durability
-            self.item_grid[x, y] = int(ItemKind.EMPTY)
-            self._spawn_item(item_kind)
+            if self.current_floor.hazard_tiles[x, y]:
+                self.health[agent_id] -= self.config.hazard_damage
+            if self.current_floor.heal_tiles[x, y]:
+                self.health[agent_id] = min(self._effective_max_health(), self.health[agent_id] + self.config.heal_tile_amount)
 
-    def _resolve_attacks(self, actions: np.ndarray, rewards: np.ndarray, terminated: np.ndarray) -> None:
-        for agent_id in self.rng.permutation(self.population_size):
-            if not self.alive[agent_id]:
+    def _resolve_enemy_turn(self, rewards: np.ndarray) -> None:
+        for enemy in self.enemy_states:
+            if not enemy.alive:
                 continue
-            if Action(int(actions[agent_id])) is not Action.ATTACK:
-                continue
-            stats = WEAPON_STATS[WeaponKind(int(self.weapon_kind[agent_id]))]
-            target_id = self._select_attack_target(agent_id, stats.range)
+            target_id = self._nearest_alive_agent(enemy.position)
             if target_id is None:
+                return
+            target_position = tuple(int(value) for value in self.positions[target_id])
+            stats = ENEMY_STATS[enemy.kind]
+            if self._distance(enemy.position, target_position) <= stats.attack_range:
+                self.health[target_id] -= stats.damage
                 continue
-            damage = stats.damage
-            self.health[target_id] -= damage
-            self.damage_dealt[agent_id] += damage
-            damage_reward = damage * self.config.attack_damage_reward_scale
-            rewards[agent_id] += damage_reward
-            self.total_reward[agent_id] += damage_reward
-            if stats.durability > 0:
-                self.weapon_durability[agent_id] -= 1.0
-                if self.weapon_durability[agent_id] <= 0:
-                    self.weapon_kind[agent_id] = int(WeaponKind.NONE)
-                    self.weapon_durability[agent_id] = 0.0
-            if self.health[target_id] <= 0 and self.alive[target_id]:
-                self._eliminate_agents([target_id])
-                terminated[target_id] = True
-                self.kills[agent_id] += 1
-                rewards[agent_id] += self.config.kill_reward
-                self.total_reward[agent_id] += self.config.kill_reward
+            self._move_enemy_toward(enemy, target_position)
 
-    def _select_attack_target(self, agent_id: int, attack_range: int) -> int | None:
-        origin = self.positions[agent_id]
-        candidates: list[tuple[int, int, int]] = []
-        for other_id in range(self.population_size):
-            if other_id == agent_id or not self.alive[other_id]:
+    def _handle_agent_deaths(self, death_mask: np.ndarray, rewards: np.ndarray, terminated: np.ndarray) -> None:
+        for agent_id in np.flatnonzero(death_mask):
+            self.alive[agent_id] = False
+            self.health[agent_id] = 0.0
+            self.energy[agent_id] = 0.0
+            rewards[agent_id] += self.config.death_penalty
+            self.total_reward[agent_id] += self.config.death_penalty
+            terminated[agent_id] = True
+
+    def _load_floor(self, floor_index: int, preserve_team_state: bool) -> None:
+        self.current_floor = self.floors[floor_index]
+        self.current_floor_index = floor_index
+        self.gate_open = not self.current_floor.gate_locked_until_boss
+        self.chest_lookup = {chest.position: chest.powerup for chest in self.current_floor.chests}
+        self.enemy_states = [
+            EnemyState(kind=spawn.kind, position=spawn.position, health=ENEMY_STATS[spawn.kind].health)
+            for spawn in self.current_floor.enemies
+        ]
+        for agent_id, position in enumerate(self.current_floor.start_positions):
+            self.positions[agent_id] = position
+            if preserve_team_state and self.alive[agent_id]:
+                self.health[agent_id] = min(
+                    self._effective_max_health(),
+                    self.health[agent_id] + self.config.floor_transition_heal,
+                )
+                self.energy[agent_id] = min(self.config.max_energy, self.energy[agent_id] + 20.0)
+        self.steps_since_progress = 0
+        self.stalled_out = False
+        self._reset_objective_tracking()
+
+    def _apply_distance_shaping(
+        self,
+        rewards: np.ndarray,
+        previous_damage: float,
+        previous_chests: int,
+        previous_bosses: int,
+        previous_floors_cleared: int,
+        previous_victory: bool,
+        floor_transition: bool,
+    ) -> bool:
+        progress_made = floor_transition
+        if float(self.damage_dealt.sum()) > previous_damage + 1e-6:
+            progress_made = True
+        if self.chests_opened > previous_chests:
+            progress_made = True
+        if self.bosses_defeated > previous_bosses:
+            progress_made = True
+        if self.floors_cleared > previous_floors_cleared:
+            progress_made = True
+        if self.victory != previous_victory:
+            progress_made = True
+
+        gate_distance = self._closest_distance([self.current_floor.gate_position])
+        chest_distance = self._closest_distance(list(self.chest_lookup))
+        boss_targets = [
+            enemy.position
+            for enemy in self.enemy_states
+            if enemy.alive and enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}
+        ]
+        boss_distance = self._closest_distance(boss_targets)
+
+        self.closest_gate_distance = self._display_distance(gate_distance)
+        self.closest_chest_distance = self._display_distance(chest_distance)
+        self.closest_boss_distance = self._display_distance(boss_distance)
+
+        if self.gate_open and gate_distance is not None:
+            if gate_distance < self.best_gate_distance:
+                delta = self.best_gate_distance - gate_distance
+                self._add_team_reward(rewards, delta * self.config.gate_distance_reward_scale)
+                progress_made = True
+            self.best_gate_distance = gate_distance
+        elif gate_distance is not None:
+            self.best_gate_distance = gate_distance
+
+        if chest_distance is not None:
+            if self.best_chest_distance >= 0 and chest_distance < self.best_chest_distance:
+                delta = self.best_chest_distance - chest_distance
+                self._add_team_reward(rewards, delta * self.config.chest_distance_reward_scale)
+                progress_made = True
+            self.best_chest_distance = chest_distance
+        else:
+            self.best_chest_distance = -1
+
+        if not self.gate_open and boss_distance is not None:
+            if self.best_boss_distance >= 0 and boss_distance < self.best_boss_distance:
+                delta = self.best_boss_distance - boss_distance
+                self._add_team_reward(rewards, delta * self.config.boss_distance_reward_scale)
+                progress_made = True
+            self.best_boss_distance = boss_distance
+        else:
+            self.best_boss_distance = boss_distance if boss_distance is not None else -1
+
+        return progress_made
+
+    def _move_enemy_toward(self, enemy: EnemyState, target: tuple[int, int]) -> None:
+        ex, ey = enemy.position
+        tx, ty = target
+        dx = int(np.sign(tx - ex))
+        dy = int(np.sign(ty - ey))
+        candidates = [
+            (ex + dx, ey + dy),
+            (ex + dx, ey),
+            (ex, ey + dy),
+        ]
+        for nx, ny in candidates:
+            if self._can_enemy_enter(nx, ny):
+                enemy.position = (nx, ny)
+                return
+
+    def _nearest_enemy_in_range(self, agent_id: int) -> int | None:
+        origin = tuple(int(value) for value in self.positions[agent_id])
+        attack_range = int(1 + self.range_bonus)
+        candidates: list[tuple[float, float, int]] = []
+        for enemy_index, enemy in enumerate(self.enemy_states):
+            if not enemy.alive:
                 continue
-            target = self.positions[other_id]
-            distance = abs(int(origin[0]) - int(target[0])) + abs(int(origin[1]) - int(target[1]))
+            distance = self._distance(origin, enemy.position)
             if distance <= attack_range:
-                candidates.append((distance, int(self.health[other_id]), other_id))
+                candidates.append((distance, enemy.health, enemy_index))
         if not candidates:
             return None
         candidates.sort(key=lambda item: (item[0], item[1]))
         return candidates[0][2]
 
-    def _eliminate_dead_agents(self) -> np.ndarray:
-        dead_mask = self.alive & (self.health <= 0)
-        if dead_mask.any():
-            self._eliminate_agents(np.flatnonzero(dead_mask))
-        return dead_mask
-
-    def _eliminate_agents(self, agent_ids: Iterable[int]) -> None:
-        for agent_id in agent_ids:
+    def _nearest_alive_agent(self, origin: tuple[int, int]) -> int | None:
+        candidates: list[tuple[float, int]] = []
+        for agent_id in range(self.population_size):
             if not self.alive[agent_id]:
                 continue
-            x, y = self.positions[agent_id]
-            self.alive[agent_id] = False
-            self.occupancy[x, y] = -1
-            self.health[agent_id] = 0.0
-            self.energy[agent_id] = max(0.0, self.energy[agent_id])
+            position = tuple(int(value) for value in self.positions[agent_id])
+            candidates.append((self._distance(origin, position), agent_id))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
 
     def _observe_agent(self, agent_id: int) -> np.ndarray:
         observation = np.zeros(self.config.observation_dim, dtype=np.float32)
@@ -405,12 +531,19 @@ class ArenaEnvironment:
             observation,
             cursor,
         )
-        observation[cursor] = self.health[agent_id] / self.config.max_health
+        max_health = self._effective_max_health()
+        observation[cursor] = self.health[agent_id] / max_health if max_health > 0 else 0.0
         observation[cursor + 1] = self.energy[agent_id] / self.config.max_energy
-        weapon = WeaponKind(int(self.weapon_kind[agent_id]))
-        observation[cursor + 2 + int(weapon)] = 1.0
-        if weapon is not WeaponKind.NONE:
-            observation[cursor + 7] = self.weapon_durability[agent_id] / max(1.0, WEAPON_STATS[weapon].durability)
+        observation[cursor + 2] = (self.current_floor_index + 1) / self.config.num_floors
+        observation[cursor + 3] = self.floors_cleared / self.config.num_floors
+        observation[cursor + 4] = float(self.alive.sum()) / self.population_size
+        observation[cursor + 5] = min(1.0, self.attack_bonus / 12.0)
+        observation[cursor + 6] = min(1.0, self.range_bonus / 4.0)
+        observation[cursor + 7] = min(1.0, self.speed_bonus / 4.0)
+        observation[cursor + 8] = float(self.diagonal_unlocked)
+        observation[cursor + 9] = self.chests_opened / 12.0
+        observation[cursor + 10] = self.bosses_defeated / 2.0
+        observation[cursor + 11] = float(self.gate_open)
         return observation
 
     def _encode_window(
@@ -432,58 +565,97 @@ class ArenaEnvironment:
         return cursor
 
     def _encode_cell(self, agent_id: int, x: int, y: int, accuracy: float) -> np.ndarray:
-        if not self._in_bounds(x, y):
-            channels = np.zeros(self.config.vision_channels, dtype=np.float32)
-            channels[0] = 1.0
-            return channels
-        if self.terrain_grid[x, y]:
-            channels = np.zeros(self.config.vision_channels, dtype=np.float32)
+        channels = np.zeros(self.config.vision_channels, dtype=np.float32)
+        if not self._in_bounds(x, y) or self.current_floor.terrain[x, y]:
             channels[0] = 1.0
             return channels
         if accuracy < 1.0 and self.rng.random() > accuracy and (x, y) != tuple(self.positions[agent_id]):
-            return self._sample_noisy_cell()
-        channels = np.zeros(self.config.vision_channels, dtype=np.float32)
-        occupant = self.occupancy[x, y]
-        if occupant == agent_id:
-            channels[1] = 1.0
-        elif occupant != -1:
-            channels[2] = 1.0
-        item_kind = ItemKind(int(self.item_grid[x, y]))
-        if item_kind is ItemKind.FOOD:
-            channels[3] = 1.0
-        elif item_kind is ItemKind.POISON:
-            channels[4] = 1.0
-        elif item_kind is ItemKind.MELEE:
-            channels[5] = 1.0
-        elif item_kind is ItemKind.RANGED:
-            channels[6] = 1.0
-        elif item_kind is ItemKind.RARE_MELEE:
-            channels[7] = 1.0
-        elif item_kind is ItemKind.RARE_RANGED:
-            channels[8] = 1.0
-        return channels
-
-    def _sample_noisy_cell(self) -> np.ndarray:
-        channels = np.zeros(self.config.vision_channels, dtype=np.float32)
-        sample = int(self.rng.integers(0, self.config.vision_channels))
-        if sample > 0:
+            sample = int(self.rng.integers(0, self.config.vision_channels))
             channels[sample] = 1.0
+            return channels
+        if (x, y) == tuple(self.positions[agent_id]):
+            channels[1] = 1.0
+        elif any(self.alive[idx] and tuple(self.positions[idx]) == (x, y) for idx in range(self.population_size)):
+            channels[2] = 1.0
+        for enemy in self.enemy_states:
+            if not enemy.alive or enemy.position != (x, y):
+                continue
+            if enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}:
+                channels[4] = 1.0
+            else:
+                channels[3] = 1.0
+            break
+        if (x, y) in self.chest_lookup:
+            channels[5] = 1.0
+        if (x, y) == self.current_floor.gate_position:
+            channels[6 if self.gate_open else 7] = 1.0
+        if self.current_floor.slow_tiles[x, y]:
+            channels[8] = 1.0
+        if self.current_floor.hazard_tiles[x, y]:
+            channels[9] = 1.0
+        if self.current_floor.heal_tiles[x, y]:
+            channels[10] = 1.0
         return channels
 
-    def _free_mask(self) -> np.ndarray:
-        return (self.occupancy == -1) & (self.item_grid == ItemKind.EMPTY) & ~self.terrain_grid
+    def _can_agent_enter(self, agent_id: int, x: int, y: int) -> bool:
+        if not self._in_bounds(x, y) or self.current_floor.terrain[x, y]:
+            return False
+        for other_id in range(self.population_size):
+            if other_id != agent_id and self.alive[other_id] and tuple(self.positions[other_id]) == (x, y):
+                return False
+        for enemy in self.enemy_states:
+            if enemy.alive and enemy.position == (x, y):
+                return False
+        return True
 
-    def _free_cells(self) -> np.ndarray:
-        return np.argwhere(self._free_mask())
+    def _can_enemy_enter(self, x: int, y: int) -> bool:
+        if not self._in_bounds(x, y) or self.current_floor.terrain[x, y]:
+            return False
+        if any(self.alive[idx] and tuple(self.positions[idx]) == (x, y) for idx in range(self.population_size)):
+            return False
+        if any(enemy.alive and enemy.position == (x, y) for enemy in self.enemy_states):
+            return False
+        return True
 
-    def _is_corner_cell(self, x: int, y: int) -> bool:
-        corner_band = max(2, self.grid_size // 5)
-        return (
-            (x < corner_band and y < corner_band)
-            or (x < corner_band and y >= self.grid_size - corner_band)
-            or (x >= self.grid_size - corner_band and y < corner_band)
-            or (x >= self.grid_size - corner_band and y >= self.grid_size - corner_band)
-        )
+    def _effective_max_health(self) -> float:
+        return self.config.max_health + self.vitality_bonus
+
+    def _closest_distance(self, targets: list[tuple[int, int]]) -> int | None:
+        if not targets:
+            return None
+        live_positions = [tuple(int(value) for value in self.positions[idx]) for idx in range(self.population_size) if self.alive[idx]]
+        if not live_positions:
+            return None
+        return min(self._manhattan_distance(position, target) for position in live_positions for target in targets)
+
+    def _display_distance(self, distance: int | None) -> int:
+        return int(distance) if distance is not None else -1
+
+    def _reset_objective_tracking(self) -> None:
+        gate_distance = self._closest_distance([self.current_floor.gate_position])
+        chest_distance = self._closest_distance(list(self.chest_lookup))
+        boss_targets = [
+            enemy.position
+            for enemy in self.enemy_states
+            if enemy.alive and enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}
+        ]
+        boss_distance = self._closest_distance(boss_targets)
+        self.closest_gate_distance = self._display_distance(gate_distance)
+        self.closest_chest_distance = self._display_distance(chest_distance)
+        self.closest_boss_distance = self._display_distance(boss_distance)
+        self.best_gate_distance = self.closest_gate_distance
+        self.best_chest_distance = self.closest_chest_distance
+        self.best_boss_distance = self.closest_boss_distance
+
+    def _distance(self, origin: tuple[int, int], target: tuple[int, int]) -> int:
+        return max(abs(origin[0] - target[0]), abs(origin[1] - target[1]))
+
+    def _manhattan_distance(self, origin: tuple[int, int], target: tuple[int, int]) -> int:
+        return abs(origin[0] - target[0]) + abs(origin[1] - target[1])
+
+    def _add_team_reward(self, rewards: np.ndarray, value: float) -> None:
+        rewards += value
+        self.total_reward += value
 
     def _in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.grid_size and 0 <= y < self.grid_size

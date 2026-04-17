@@ -27,8 +27,14 @@ class EvolutionEngine:
         parent_distribution = elite_scores / elite_scores.sum()
 
         while len(next_population) < self.config.population_size:
-            parent_id = int(self.rng.choice(elite_indices, p=parent_distribution))
-            child_state = policy_bank.export_policy_state(parent_id)
+            first_parent_id = int(self.rng.choice(elite_indices, p=parent_distribution))
+            second_parent_id = int(self.rng.choice(elite_indices, p=parent_distribution))
+            first_parent = policy_bank.export_policy_state(first_parent_id)
+            second_parent = policy_bank.export_policy_state(second_parent_id)
+            if self.rng.random() < self.config.crossover_rate and first_parent_id != second_parent_id:
+                child_state = self._crossover_states(first_parent, second_parent)
+            else:
+                child_state = first_parent
             next_population.append(self._mutate_state(child_state))
 
         policy_bank.load_population(next_population[: self.config.population_size])
@@ -42,3 +48,19 @@ class EvolutionEngine:
                 clone += torch.randn_like(clone) * self.config.mutation_std
             mutated[name] = clone
         return mutated
+
+    def _crossover_states(
+        self,
+        first_state: dict[str, torch.Tensor],
+        second_state: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        crossed: dict[str, torch.Tensor] = {}
+        for name, first_tensor in first_state.items():
+            second_tensor = second_state[name]
+            if not first_tensor.is_floating_point():
+                crossed[name] = first_tensor.clone()
+                continue
+            selector = torch.rand_like(first_tensor, dtype=torch.float32)
+            mask = selector < self.config.crossover_swap_probability
+            crossed[name] = torch.where(mask, first_tensor, second_tensor)
+        return crossed

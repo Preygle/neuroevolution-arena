@@ -1,8 +1,76 @@
-# Behavior Mutation Arena
+# Dungeon Crawler Team RL
 
-Behavior Mutation Arena is a modular multi-agent reinforcement learning sandbox built around a 15x15 combat-and-foraging grid. The current implementation is a runnable Python-first baseline with a clean backend seam for a future pybind11 C++ environment core, while keeping PPO and evolutionary logic in Python.
+This branch turns the old arena experiment into a fixed-layout cooperative dungeon campaign. A five-agent team starts from a known spawn, climbs through ten handcrafted floors, opens chests for permanent team buffs, defeats minibosses on floor 5 and floor 10, and learns route quality rather than surviving on random map luck.
 
-This branch includes the `v1.1` learning-focused environment changes: fixed-map curriculum, structured terrain, center-biased resource placement, exploration reward, and anti-camping penalties.
+The Python package name is still `behavior_mutation_arena` for continuity, but the active project on `dungeon-crawler-training` is a dungeon crawler training stack.
+
+## Why this redesign exists
+
+The arena version was too noisy to learn from consistently:
+
+- terrain changed too often
+- reward spikes were dominated by luck
+- survival could beat meaningful progression
+- policies were not getting repeated practice on the same tactical problems
+
+This branch replaces that setup with static floors, fixed starts, deterministic objectives, and reusable power-up routes so policies can improve generation over generation.
+
+## Campaign loop
+
+- Team size: `5`
+- Grid size: `36x36`
+- Floors: `10`
+- Episode length: `650` steps
+- Spawn: fixed team formation at the start of every floor
+- Progression: reach the gate to move up a floor
+- Boss cadence: miniboss on floor `5`, final boss on floor `10`
+- Goal: learn the best chest path, combat pacing, and boss-clear route that leads to a full clear
+
+Each floor uses a different biome and tactical pressure:
+
+- `Verdant Entry`: jungle opener with healing and early core buffs
+- `Glacier Pass`: ice floor with slow regions and mobility upgrades
+- `Ember Forges`: lava floor with hazard routing and damage pressure
+- `Cryptic Stacks`: ruins with library-style chokepoints and heal pockets
+- `Warden Keep`: first boss floor, gate locked behind a miniboss
+- `Swamp Descent`: attrition floor with slows and hazards
+- `Crystal Caverns`: dual-heal routing and split-lane decisions
+- `Storm Bastion`: high-pressure mid-late floor
+- `Inferno Ascent`: late-game hazard floor before the throne
+- `Abyss Throne`: final boss floor designed to be beatable only if the team arrives with the right upgrades and enough health
+
+## Power-ups and progression
+
+Chests grant permanent team-wide buffs for the rest of the run:
+
+- `Damage`: higher attack damage
+- `Range`: longer attack reach
+- `Speed`: extra movement per step
+- `Diagonal`: unlocks diagonal movement
+- `Vitality`: raises effective max health and heals the team
+
+This makes route planning trainable. A policy can skip a chest, fail later, and eventually learn that the earlier detour was necessary for a later boss or floor.
+
+## Reward design
+
+The reward signal is now shaped around campaign progress instead of passive survival:
+
+- small per-step cost to avoid wasting turns
+- reward for opening chests
+- reward for damage dealt
+- reward for clearing gates and floors
+- large reward for defeating minibosses and the final boss
+- victory reward for finishing the full dungeon
+- penalties for death and full team wipes
+
+Fitness also tracks strategic progress:
+
+- floors cleared
+- bosses defeated
+- chests opened
+- damage dealt
+- survival contribution
+- final victory bonus
 
 ## Project structure
 
@@ -10,6 +78,7 @@ This branch includes the `v1.1` learning-focused environment changes: fixed-map 
 behavior_mutation_arena/
   config.py
   core/
+    dungeon_floors.py
     environment.py
     models.py
     replay.py
@@ -33,6 +102,7 @@ native/
   src/
     bindings.cpp
 scripts/
+  evaluate_checkpoint.py
   plot_metrics.py
   replay_best.py
   train.py
@@ -42,85 +112,101 @@ artifacts/
   replays/
 ```
 
-## Architecture
+## Main modules
 
-- `core.environment.ArenaEnvironment`: high-throughput grid simulation, combat, spawning, observation encoding, reward accounting
-- `rl.policy.ActorCriticPolicy`: per-agent neural network policy/value model
-- `rl.ppo.PPOPolicyBank`: PPO updates for the full 30-agent population
-- `evolution.engine.EvolutionEngine`: elite selection, cloning, Gaussian mutation of policy weights
-- `interface.api.ArenaSimulation`: generation loop, replay capture, checkpointing, metrics persistence
-- `visual.renderer.ArenaRenderer`: live grid rendering and replay playback
-- `visual.plots`: training metric export and plots
+- `core.dungeon_floors`: deterministic floor geometry, chest placement, enemy placement, gate positions
+- `core.environment.ArenaEnvironment`: team simulation, movement, combat, buffs, floor transitions, observations, rewards
+- `rl.policy.ActorCriticPolicy`: actor-critic network used by each team member policy
+- `rl.ppo.PPOPolicyBank`: rollout action selection and PPO updates for the current population
+- `evolution.engine.EvolutionEngine`: elite selection and Gaussian mutation between generations
+- `interface.api.ArenaSimulation`: generation loop, checkpointing, plots, and replay capture
+- `visual.renderer.ArenaRenderer`: live dungeon rendering
+- `visual.plots`: training metric plotting for floor progress, bosses, chests, and success rate
 
-The environment core is intentionally separated behind `interface.backend.build_backend()`. That keeps the Python PPO stack stable when you later swap the simulation backend to C++ through pybind11.
-
-## Current feature set
-
-- 30 agents per generation on a 15x15 grid
-- Fixed-length 180-step episodes by default for lower rollout variance
-- Food, poison, melee, ranged, and rare weapon pickups
-- Structured terrain map pool with curriculum-based rotation
-- Edge-biased spawn zones and center-biased contested resources
-- Health, energy, inventory, durability, kills, reward, and survival tracking
-- Exploration and camping metrics used during selection
-- Accurate 3x3 observation window
-- Noisy 5x5 observation window with configurable accuracy
-- PPO updates during each generation
-- Evolutionary replacement after each generation using elite selection and Gaussian mutation
-- Live Pygame visualization
-- Best-agent replay capture
-- Fitness, survival, kill, exploration, and camping plotting
-
-## Run
-
-Install in editable mode if you want package resolution from anywhere:
+## Install
 
 ```powershell
 python -m pip install -e .
 ```
 
-Run training:
+## Train
+
+Run a fresh training session:
 
 ```powershell
-python scripts/train.py --generations 20
+python scripts/train.py --generations 50 --scratch
 ```
 
-Resume automatically from the latest progress checkpoint unless you explicitly start over:
+Run multiple dungeon instances per generation so PPO and evolution score the same team across more than one rollout:
 
 ```powershell
-python scripts/train.py --generations 1000 --scratch
+python scripts/train.py --generations 50 --instances 4 --scratch
 ```
 
-Run with live rendering:
+Resume from the latest checkpoint:
 
 ```powershell
-python scripts/train.py --generations 10 --render
+python scripts/train.py --generations 200
 ```
 
-Replay the best recorded episode:
+Render the run live:
+
+```powershell
+python scripts/train.py --generations 20 --render
+```
+
+Render a tiled multi-instance window while simulating more instances than you draw:
+
+```powershell
+python scripts/train.py --generations 20 --instances 100 --render --render-instances 20
+```
+
+Checkpointing happens every `10` generations by default, so `Ctrl+C` still leaves you with restartable progress.
+
+Safety caps are built in:
+
+- at most `100` simulated instances per run
+- at most `100` rendered instances per run
+- if `--render-instances` is omitted, the renderer defaults to `20` so the window stays readable while all requested instances still simulate
+
+## Parallel execution notes
+
+- The current trainer batches policy inference across all live instances, which helps both CPU and GPU utilization.
+- Environment stepping is parallelized with a `ThreadPoolExecutor`, which is a good fit for the numpy-heavy parts of the environment without paying Windows process-spawn startup cost on every run.
+- On Windows, true multiprocessing uses `spawn`, not `fork`, so worker startup has a one-time import cost.
+- If we later move the environment shard workers into a persistent `ProcessPoolExecutor` or dedicated worker processes, that should unlock more CPU scaling than threads for the pure-Python parts of stepping.
+
+## Evaluate and inspect
+
+Evaluate the saved best policy:
+
+```powershell
+python scripts/evaluate_checkpoint.py --episodes 5
+```
+
+Replay the best recorded run:
 
 ```powershell
 python scripts/replay_best.py
 ```
 
-Rebuild plots from CSV:
+Rebuild training plots from the CSV log:
 
 ```powershell
 python scripts/plot_metrics.py
 ```
 
-Evaluate the saved champion across the full fixed map pool:
-
-```powershell
-python scripts/evaluate_checkpoint.py --episodes-per-map 2
-```
-
-Artifacts are written to:
+## Metrics written to artifacts
 
 - `artifacts/checkpoints/best_policy.pt`
+- `artifacts/checkpoints/training_state.pt`
 - `artifacts/replays/best_replay.pkl`
 - `artifacts/metrics.csv`
 - `artifacts/plots/training_metrics.png`
+
+## Current backend direction
+
+The simulation still runs in Python first, but the boundary for a native backend is preserved through `interface.backend.build_backend()`. That lets us keep PPO and evolution in Python while moving hot environment loops to C++ with pybind11 later.
 
 ## Parallelization path
 

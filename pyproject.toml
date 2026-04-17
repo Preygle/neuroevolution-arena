@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "behavior-mutation-arena"
 version = "0.1.0"
-description = "Hybrid-ready multi-agent PPO and evolutionary arena simulator"
+description = "Hybrid-ready PPO and evolutionary dungeon crawler team simulator"
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.26",
@@ -16,4 +16,3 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["behavior_mutation_arena*"]
-

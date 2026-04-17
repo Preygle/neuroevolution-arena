@@ -9,107 +9,136 @@ class Action(IntEnum):
     MOVE_DOWN = 1
     MOVE_LEFT = 2
     MOVE_RIGHT = 3
-    STAY = 4
-    ATTACK = 5
-    PICK_ITEM = 6
+    MOVE_UP_LEFT = 4
+    MOVE_UP_RIGHT = 5
+    MOVE_DOWN_LEFT = 6
+    MOVE_DOWN_RIGHT = 7
+    ATTACK = 8
+    OPEN_CHEST = 9
+    USE_GATE = 10
+    STAY = 11
 
 
-class WeaponKind(IntEnum):
-    NONE = 0
-    MELEE = 1
-    RANGED = 2
-    RARE_MELEE = 3
-    RARE_RANGED = 4
+class PowerUpType(IntEnum):
+    DAMAGE = 0
+    RANGE = 1
+    SPEED = 2
+    DIAGONAL = 3
+    VITALITY = 4
 
 
-class ItemKind(IntEnum):
-    EMPTY = 0
-    FOOD = 1
-    POISON = 2
-    MELEE = 3
-    RANGED = 4
-    RARE_MELEE = 5
-    RARE_RANGED = 6
+class EnemyKind(IntEnum):
+    SKIRMISHER = 0
+    ARCHER = 1
+    MINI_BOSS = 2
+    FINAL_BOSS = 3
 
 
 @dataclass(frozen=True)
-class WeaponStats:
-    kind: WeaponKind
-    range: int
+class PowerUpStats:
+    attack_bonus: float = 0.0
+    range_bonus: float = 0.0
+    speed_bonus: int = 0
+    vitality_bonus: float = 0.0
+    diagonal_unlocked: bool = False
+    reward: float = 0.0
+
+
+@dataclass(frozen=True)
+class EnemyStats:
+    health: float
     damage: float
-    durability: float
+    attack_range: int
+    armor: float
+    reward: float
 
 
-WEAPON_STATS = {
-    WeaponKind.NONE: WeaponStats(WeaponKind.NONE, range=1, damage=4.0, durability=-1.0),
-    WeaponKind.MELEE: WeaponStats(WeaponKind.MELEE, range=1, damage=18.0, durability=6.0),
-    WeaponKind.RANGED: WeaponStats(WeaponKind.RANGED, range=3, damage=11.0, durability=8.0),
-    WeaponKind.RARE_MELEE: WeaponStats(WeaponKind.RARE_MELEE, range=2, damage=25.0, durability=8.0),
-    WeaponKind.RARE_RANGED: WeaponStats(WeaponKind.RARE_RANGED, range=5, damage=15.0, durability=10.0),
+POWERUP_STATS = {
+    PowerUpType.DAMAGE: PowerUpStats(attack_bonus=2.0, reward=16.0),
+    PowerUpType.RANGE: PowerUpStats(range_bonus=1.0, reward=14.0),
+    PowerUpType.SPEED: PowerUpStats(speed_bonus=1, reward=12.0),
+    PowerUpType.DIAGONAL: PowerUpStats(diagonal_unlocked=True, reward=18.0),
+    PowerUpType.VITALITY: PowerUpStats(vitality_bonus=12.0, reward=14.0),
 }
 
-ITEM_TO_WEAPON = {
-    ItemKind.MELEE: WeaponKind.MELEE,
-    ItemKind.RANGED: WeaponKind.RANGED,
-    ItemKind.RARE_MELEE: WeaponKind.RARE_MELEE,
-    ItemKind.RARE_RANGED: WeaponKind.RARE_RANGED,
+ENEMY_STATS = {
+    EnemyKind.SKIRMISHER: EnemyStats(health=32.0, damage=8.0, attack_range=1, armor=1.0, reward=10.0),
+    EnemyKind.ARCHER: EnemyStats(health=26.0, damage=6.0, attack_range=3, armor=1.0, reward=10.0),
+    EnemyKind.MINI_BOSS: EnemyStats(health=180.0, damage=14.0, attack_range=2, armor=6.0, reward=60.0),
+    EnemyKind.FINAL_BOSS: EnemyStats(health=430.0, damage=18.0, attack_range=3, armor=10.0, reward=180.0),
 }
 
 
 @dataclass
 class ArenaConfig:
-    grid_size: int = 15
-    population_size: int = 30
-    episode_steps_min: int = 180
-    episode_steps_max: int = 180
-    local_vision: int = 3
-    extended_vision: int = 5
-    extended_accuracy: float = 0.7
-    max_health: float = 100.0
-    initial_health: float = 100.0
-    max_energy: float = 60.0
-    initial_energy: float = 40.0
-    step_energy_cost: float = 1.0
-    starvation_damage: float = 2.0
-    food_energy: float = 18.0
-    poison_damage: float = 18.0
-    food_reward: float = 8.0
-    poison_reward: float = -12.0
-    kill_reward: float = 28.0
-    survival_reward: float = 0.15
-    exploration_reward: float = 0.45
-    attack_damage_reward_scale: float = 0.45
-    camp_radius: int = 1
-    camp_threshold: int = 8
-    camping_penalty: float = 0.6
-    corner_camping_penalty: float = 0.35
-    fitness_kill_weight: float = 8.0
-    fitness_damage_weight: float = 0.1
-    fitness_exploration_weight: float = 0.75
-    fitness_camping_weight: float = 1.1
-    curriculum_initial_map_count: int = 4
-    curriculum_full_map_count: int = 8
-    curriculum_growth_generations: int = 1200
-    spawn_band_width: int = 2
-    food_count: int = 26
-    poison_count: int = 18
-    melee_count: int = 10
-    ranged_count: int = 8
-    rare_melee_count: int = 4
-    rare_ranged_count: int = 2
-    hidden_size: int = 128
+    environment_name: str = "dungeon_crawler_training_v1"
+    grid_size: int = 36
+    population_size: int = 5
+    num_floors: int = 10
+    episode_steps_min: int = 650
+    episode_steps_max: int = 650
+    local_vision: int = 5
+    extended_vision: int = 9
+    extended_accuracy: float = 0.85
+    max_health: float = 110.0
+    initial_health: float = 90.0
+    max_energy: float = 140.0
+    initial_energy: float = 120.0
+    step_energy_cost: float = 0.45
+    diagonal_energy_cost: float = 0.7
+    slow_tile_extra_cost: float = 0.55
+    hazard_damage: float = 4.0
+    heal_tile_amount: float = 2.0
+    floor_transition_heal: float = 10.0
+    attack_base_damage: float = 6.0
+    attack_damage_reward_scale: float = 0.75
+    step_penalty: float = -0.03
+    gate_distance_reward_scale: float = 0.85
+    chest_distance_reward_scale: float = 0.4
+    boss_distance_reward_scale: float = 0.65
+    chest_reward: float = 10.0
+    gate_reward: float = 18.0
+    floor_clear_reward: float = 28.0
+    mini_boss_reward: float = 60.0
+    final_boss_reward: float = 180.0
+    victory_reward: float = 260.0
+    death_penalty: float = -12.0
+    team_wipe_penalty: float = -80.0
+    no_progress_penalty_interval: int = 12
+    no_progress_penalty: float = -4.0
+    no_progress_patience: int = 40
+    no_progress_termination_penalty: float = -16.0
+    floor_progress_weight: float = 42.0
+    boss_weight: float = 72.0
+    chest_weight: float = 9.0
+    victory_weight: float = 220.0
+    damage_weight: float = 0.18
+    survival_weight: float = 0.12
+    hidden_size: int = 256
     ppo_learning_rate: float = 3e-4
     ppo_clip: float = 0.2
-    ppo_gamma: float = 0.99
+    ppo_gamma: float = 0.995
     ppo_lambda: float = 0.95
     ppo_epochs: int = 6
-    ppo_minibatch_size: int = 64
+    ppo_minibatch_size: int = 128
     ppo_value_coef: float = 0.5
     ppo_entropy_coef: float = 0.01
     ppo_max_grad_norm: float = 0.5
-    elite_fraction: float = 0.3
-    mutation_std: float = 0.015
-    render_cell_size: int = 36
+    elite_fraction: float = 0.4
+    mutation_std: float = 0.01
+    crossover_rate: float = 0.9
+    crossover_swap_probability: float = 0.5
+    instance_count: int = 1
+    max_instance_count: int = 100
+    max_render_instance_count: int = 100
+    env_worker_count: int = 0
+    default_render_instance_count: int = 20
+    render_columns: int = 5
+    render_page_seconds: float = 1.25
+    render_min_cell_size: int = 6
+    render_max_window_width: int = 1840
+    render_max_window_height: int = 1040
+    render_cell_size: int = 24
     render_fps: int = 30
     seed: int = 7
     device: str = "cpu"
@@ -120,11 +149,11 @@ class ArenaConfig:
 
     @property
     def vision_channels(self) -> int:
-        return 9
+        return 11
 
     @property
     def scalar_feature_count(self) -> int:
-        return 8
+        return 12
 
     @property
     def observation_dim(self) -> int:
@@ -132,15 +161,5 @@ class ArenaConfig:
         extended_cells = self.extended_vision * self.extended_vision
         return self.vision_channels * (local_cells + extended_cells) + self.scalar_feature_count
 
-    def item_spawn_counts(self) -> dict[ItemKind, int]:
-        return {
-            ItemKind.FOOD: self.food_count,
-            ItemKind.POISON: self.poison_count,
-            ItemKind.MELEE: self.melee_count,
-            ItemKind.RANGED: self.ranged_count,
-            ItemKind.RARE_MELEE: self.rare_melee_count,
-            ItemKind.RARE_RANGED: self.rare_ranged_count,
-        }
-
-    def to_dict(self) -> dict[str, float | int]:
+    def to_dict(self) -> dict[str, float | int | str]:
         return self.__dict__.copy()
