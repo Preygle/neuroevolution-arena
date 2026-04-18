@@ -140,7 +140,7 @@ python scripts/train.py --generations 50 --scratch
 Run multiple dungeon instances per generation so PPO and evolution score the same team across more than one rollout:
 
 ```powershell
-python scripts/train.py --generations 50 --instances 4 --scratch
+python scripts/train.py --generations 50 --instances 32 --scratch
 ```
 
 Resume from the latest checkpoint:
@@ -158,7 +158,7 @@ python scripts/train.py --generations 20 --render
 Render a tiled multi-instance window while simulating more instances than you draw:
 
 ```powershell
-python scripts/train.py --generations 20 --instances 100 --render --render-instances 20
+python scripts/train.py --generations 20 --instances 32 --render --render-instances 20
 ```
 
 Checkpointing happens every `10` generations by default, so `Ctrl+C` still leaves you with restartable progress.
@@ -167,6 +167,7 @@ Safety caps are built in:
 
 - at most `100` simulated instances per run
 - at most `100` rendered instances per run
+- the default training setup now uses `32` simulated instances with `16` worker threads
 - if `--render-instances` is omitted, the renderer defaults to `20` so the window stays readable while all requested instances still simulate
 
 ## Parallel execution notes

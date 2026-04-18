@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -85,8 +86,10 @@ class ArenaSimulation:
             return self.history
 
         completed_generations = self.start_generation
+        self._print_training_banner(generations)
         try:
             for generation in range(self.start_generation, generations):
+                _gen_start = time.perf_counter()
                 for environment in self.environments:
                     if hasattr(environment, "set_generation"):
                         environment.set_generation(generation)
@@ -187,6 +190,8 @@ class ArenaSimulation:
                     elite_ids=elite_ids,
                 )
                 self.history.append(summary)
+                _gen_elapsed = time.perf_counter() - _gen_start
+                self._print_generation_progress(summary, generations, _gen_elapsed)
 
                 completed_generations = generation + 1
                 if completed_generations % self.checkpoint_interval == 0:
@@ -448,3 +453,50 @@ class ArenaSimulation:
         if self.executor is not None:
             self.executor.shutdown(wait=True)
             self.executor = None
+
+    # ------------------------------------------------------------------
+    # CLI output helpers
+    # ------------------------------------------------------------------
+
+    def _print_training_banner(self, total_generations: int) -> None:
+        device = self.config.device
+        sep = "=" * 64
+        print(sep)
+        print("  Neuroevolution Arena — Training")
+        print(sep)
+        print(f"  Generations     : {self.start_generation} → {total_generations}  "
+              f"(remaining: {total_generations - self.start_generation})")
+        print(f"  Instances       : {self.instance_count}  |  Workers: {self.worker_count}")
+        print(f"  Population size : {self.config.population_size}")
+        print(f"  Device          : {device}")
+        print(f"  Seed            : {self.seed}")
+        print(sep)
+        # Column header — keep widths in sync with _print_generation_progress
+        print(
+            f"  {'Gen':>7}  {'BestFit':>9}  {'MeanFit':>9}  {'Floor':>5}  "
+            f"{'Surv':>5}  {'Boss':>4}  {'Win%':>5}  {'Champ':>5}  {'s/gen':>6}"
+        )
+        print("  " + "-" * 62)
+
+    def _print_generation_progress(
+        self,
+        summary: GenerationSummary,
+        total_generations: int,
+        elapsed: float,
+    ) -> None:
+        gen_str = f"{summary.generation + 1}/{total_generations}"
+        win_pct = summary.success_rate * 100.0
+        elite_str = ",".join(str(e) for e in summary.elite_ids)
+        new_best = "★" if summary.best_fitness >= self.best_fitness else " "
+        print(
+            f"  {gen_str:>7}  "
+            f"{summary.best_fitness:>9.1f}  "
+            f"{summary.mean_fitness:>9.1f}  "
+            f"{summary.mean_floor_reached:>5.2f}  "
+            f"{summary.mean_survival:>5.0f}  "
+            f"{summary.mean_bosses_defeated:>4.2f}  "
+            f"{win_pct:>4.1f}%  "
+            f"P{summary.champion_id:>3}  "
+            f"{elapsed:>5.1f}s"
+            f"  {new_best}"
+        )

@@ -13,16 +13,30 @@ from behavior_mutation_arena.interface.api import ArenaSimulation
 
 
 def build_parser() -> argparse.ArgumentParser:
+    defaults = ArenaConfig()
     parser = argparse.ArgumentParser(description="Train the cooperative dungeon crawler team.")
     parser.add_argument("--generations", type=int, default=20)
     parser.add_argument("--backend", choices=["python", "native"], default="python")
     parser.add_argument("--render", action="store_true")
-    parser.add_argument("--instances", type=int, default=1)
+    parser.add_argument("--instances", type=int, default=defaults.instance_count)
     parser.add_argument("--render-instances", type=int, default=None)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--scratch", action="store_true")
     parser.add_argument("--checkpoint-interval", type=int, default=10)
+    parser.add_argument(
+        "--artifact-dir",
+        type=Path,
+        default=None,
+        help="Root directory for checkpoints, metrics, plots, replays. "
+             "Defaults to artifacts/ (or artifacts/<name>/ if --name is given).",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Short run name; creates artifacts/<name>/ so parallel runs don't clash.",
+    )
     return parser
 
 
@@ -48,11 +62,20 @@ def main() -> None:
             f"using {config.max_render_instance_count}"
         )
     config.max_render_instance_count = max(1, min(requested_render_instances, config.max_render_instance_count))
+    # Resolve artifact directory
+    if args.artifact_dir is not None:
+        artifact_dir = args.artifact_dir
+    elif args.name is not None:
+        artifact_dir = Path("artifacts") / args.name
+    else:
+        artifact_dir = Path("artifacts")
+
     simulation = ArenaSimulation(
         config=config,
         backend=args.backend,
         seed=args.seed,
         render=args.render,
+        artifact_dir=artifact_dir,
         checkpoint_interval=args.checkpoint_interval,
         scratch=args.scratch,
     )

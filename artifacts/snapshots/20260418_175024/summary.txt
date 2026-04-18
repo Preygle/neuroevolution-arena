@@ -1,0 +1,23 @@
+========================================================
+  Neuroevolution Arena — Training Snapshot
+========================================================
+  Snapshot time : 2026-04-18 17:50:24
+  Source CSV    : C:\Users\moham\Documents\PROGRAMMING\Neuroevolution Arena RL\artifacts\metrics.csv
+  Generations   : 414  (0 → 413)
+
+  — Last generation —
+    Best fitness   : 438.69
+    Mean fitness   : 433.32
+    Mean floor     : 1.00
+    Mean survival  : 633 steps
+    Mean bosses    : 0.00
+    Mean chests    : 2.00
+    Win rate       : 0.0%
+    Champion agent : P3
+
+  — All-time best (gen 410) —
+    Best fitness   : 450.62
+    Mean fitness   : 446.76
+    Floor reached  : 1.00
+    Win rate       : 0.0%
+========================================================
