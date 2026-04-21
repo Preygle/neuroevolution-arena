@@ -64,6 +64,7 @@ class ArenaEnvironment:
         self.max_floor_reached = 1
         self.bosses_defeated = 0
         self.chests_opened = 0
+        self.powerup_pickups = np.zeros(len(PowerUpType), dtype=np.int16)
         self.victory = False
         self.gate_open = True
         self.chest_lookup: dict[tuple[int, int], PowerUpType] = {}
@@ -74,9 +75,13 @@ class ArenaEnvironment:
         self.closest_gate_distance = 0
         self.closest_chest_distance = -1
         self.closest_boss_distance = -1
+        self.best_gate_distance_reached = -1
         self.best_gate_distance = 0
         self.best_chest_distance = -1
         self.best_boss_distance = -1
+        self.gate_tile_visits = 0
+        self.use_gate_attempts = 0
+        self.invalid_use_gate_attempts = 0
 
     def set_generation(self, generation: int) -> None:
         self.current_generation = generation
@@ -105,10 +110,15 @@ class ArenaEnvironment:
         self.max_floor_reached = 1
         self.bosses_defeated = 0
         self.chests_opened = 0
+        self.powerup_pickups.fill(0)
         self.victory = False
         self.team_wiped = False
         self.stalled_out = False
         self.steps_since_progress = 0
+        self.best_gate_distance_reached = -1
+        self.gate_tile_visits = 0
+        self.use_gate_attempts = 0
+        self.invalid_use_gate_attempts = 0
         self._load_floor(self.current_floor_index, preserve_team_state=False)
         return self.observe_all()
 
@@ -134,6 +144,7 @@ class ArenaEnvironment:
 
         floor_transition = self._resolve_agent_actions(actions, rewards)
         self._apply_tile_effects(rewards)
+        self.gate_tile_visits += self._count_gate_occupants()
 
         if not floor_transition and not self.victory:
             self._resolve_enemy_turn(rewards)
@@ -186,11 +197,21 @@ class ArenaEnvironment:
             "floor_name": self.current_floor.name,
             "bosses_defeated": self.bosses_defeated,
             "chests_opened": self.chests_opened,
+            "powerups_picked": int(self.powerup_pickups.sum()),
+            "damage_powerups": int(self.powerup_pickups[PowerUpType.DAMAGE]),
+            "range_powerups": int(self.powerup_pickups[PowerUpType.RANGE]),
+            "speed_powerups": int(self.powerup_pickups[PowerUpType.SPEED]),
+            "diagonal_powerups": int(self.powerup_pickups[PowerUpType.DIAGONAL]),
+            "vitality_powerups": int(self.powerup_pickups[PowerUpType.VITALITY]),
             "victory": self.victory,
             "gate_open": self.gate_open,
             "closest_gate_distance": self.closest_gate_distance,
+            "best_gate_distance": self.best_gate_distance_reached,
             "closest_chest_distance": self.closest_chest_distance,
             "closest_boss_distance": self.closest_boss_distance,
+            "gate_tile_visits": self.gate_tile_visits,
+            "use_gate_attempts": self.use_gate_attempts,
+            "invalid_use_gate_attempts": self.invalid_use_gate_attempts,
             "steps_since_progress": self.steps_since_progress,
             "stalled_out": self.stalled_out,
         }
@@ -231,11 +252,17 @@ class ArenaEnvironment:
             "diagonal_unlocked": self.diagonal_unlocked,
             "bosses_defeated": self.bosses_defeated,
             "chests_opened": self.chests_opened,
+            "powerups_picked": int(self.powerup_pickups.sum()),
+            "powerup_pickups": self.powerup_pickups.copy(),
             "floors_cleared": self.floors_cleared,
             "victory": self.victory,
             "closest_gate_distance": self.closest_gate_distance,
+            "best_gate_distance": self.best_gate_distance_reached,
             "closest_chest_distance": self.closest_chest_distance,
             "closest_boss_distance": self.closest_boss_distance,
+            "gate_tile_visits": self.gate_tile_visits,
+            "use_gate_attempts": self.use_gate_attempts,
+            "invalid_use_gate_attempts": self.invalid_use_gate_attempts,
             "steps_since_progress": self.steps_since_progress,
             "stalled_out": self.stalled_out,
         }
@@ -265,6 +292,16 @@ class ArenaEnvironment:
                     gate_distance=float(self.closest_gate_distance),
                     fitness=float(fitness),
                     victory=int(self.victory),
+                    powerups_picked=int(self.powerup_pickups.sum()),
+                    damage_powerups=int(self.powerup_pickups[PowerUpType.DAMAGE]),
+                    range_powerups=int(self.powerup_pickups[PowerUpType.RANGE]),
+                    speed_powerups=int(self.powerup_pickups[PowerUpType.SPEED]),
+                    diagonal_powerups=int(self.powerup_pickups[PowerUpType.DIAGONAL]),
+                    vitality_powerups=int(self.powerup_pickups[PowerUpType.VITALITY]),
+                    best_gate_distance=float(self.best_gate_distance_reached),
+                    gate_tile_visits=float(self.gate_tile_visits),
+                    use_gate_attempts=float(self.use_gate_attempts),
+                    invalid_use_gate_attempts=float(self.invalid_use_gate_attempts),
                 )
             )
         return metrics
@@ -280,8 +317,17 @@ class ArenaEnvironment:
                 self._agent_attack(agent_id, rewards)
             elif action is Action.OPEN_CHEST:
                 self._open_chest(agent_id, rewards)
-            elif action is Action.USE_GATE and self._use_gate(agent_id, rewards):
-                return True
+            elif action is Action.USE_GATE:
+                self.use_gate_attempts += 1
+                if self._use_gate(agent_id, rewards):
+                    return True
+                rewards[agent_id] += self.config.invalid_gate_action_penalty
+                self.total_reward[agent_id] += self.config.invalid_gate_action_penalty
+                self.invalid_use_gate_attempts += 1
+        if self.config.auto_use_gate and self.gate_open:
+            for agent_id in np.flatnonzero(self.alive):
+                if tuple(int(value) for value in self.positions[agent_id]) == self.current_floor.gate_position:
+                    return self._use_gate(int(agent_id), rewards)
         return False
 
     def _move_agent(self, agent_id: int, action: Action) -> None:
@@ -338,12 +384,14 @@ class ArenaEnvironment:
             self.vitality_bonus += stats.vitality_bonus
             self.health[self.alive] = np.minimum(self._effective_max_health(), self.health[self.alive] + stats.vitality_bonus)
         self.chests_opened += 1
+        self.powerup_pickups[int(powerup)] += 1
         self._add_team_reward(rewards, self.config.chest_reward + stats.reward)
 
     def _use_gate(self, agent_id: int, rewards: np.ndarray) -> bool:
         position = tuple(int(value) for value in self.positions[agent_id])
         if position != self.current_floor.gate_position or not self.gate_open:
             return False
+        self.gate_tile_visits += 1
         if self.current_floor_index == self.config.num_floors - 1:
             self.victory = True
             self.floors_cleared = self.config.num_floors
@@ -412,7 +460,7 @@ class ArenaEnvironment:
                 self.energy[agent_id] = min(self.config.max_energy, self.energy[agent_id] + 20.0)
         self.steps_since_progress = 0
         self.stalled_out = False
-        self._reset_objective_tracking()
+        self._reset_objective_tracking(reset_episode_tracking=not preserve_team_state)
 
     def _apply_distance_shaping(
         self,
@@ -448,31 +496,42 @@ class ArenaEnvironment:
         self.closest_gate_distance = self._display_distance(gate_distance)
         self.closest_chest_distance = self._display_distance(chest_distance)
         self.closest_boss_distance = self._display_distance(boss_distance)
+        if self.closest_gate_distance >= 0:
+            if self.best_gate_distance_reached < 0:
+                self.best_gate_distance_reached = self.closest_gate_distance
+            else:
+                self.best_gate_distance_reached = min(self.best_gate_distance_reached, self.closest_gate_distance)
 
         if self.gate_open and gate_distance is not None:
             if gate_distance < self.best_gate_distance:
                 delta = self.best_gate_distance - gate_distance
                 self._add_team_reward(rewards, delta * self.config.gate_distance_reward_scale)
                 progress_made = True
-            self.best_gate_distance = gate_distance
-        elif gate_distance is not None:
+                self.best_gate_distance = gate_distance
+            elif self.best_gate_distance < 0:
+                self.best_gate_distance = gate_distance
+        elif gate_distance is not None and self.best_gate_distance < 0:
             self.best_gate_distance = gate_distance
 
         if chest_distance is not None:
-            if self.best_chest_distance >= 0 and chest_distance < self.best_chest_distance:
+            if self.best_chest_distance < 0:
+                self.best_chest_distance = chest_distance
+            elif chest_distance < self.best_chest_distance:
                 delta = self.best_chest_distance - chest_distance
                 self._add_team_reward(rewards, delta * self.config.chest_distance_reward_scale)
                 progress_made = True
-            self.best_chest_distance = chest_distance
+                self.best_chest_distance = chest_distance
         else:
             self.best_chest_distance = -1
 
         if not self.gate_open and boss_distance is not None:
-            if self.best_boss_distance >= 0 and boss_distance < self.best_boss_distance:
+            if self.best_boss_distance < 0:
+                self.best_boss_distance = boss_distance
+            elif boss_distance < self.best_boss_distance:
                 delta = self.best_boss_distance - boss_distance
                 self._add_team_reward(rewards, delta * self.config.boss_distance_reward_scale)
                 progress_made = True
-            self.best_boss_distance = boss_distance
+                self.best_boss_distance = boss_distance
         else:
             self.best_boss_distance = boss_distance if boss_distance is not None else -1
 
@@ -544,6 +603,23 @@ class ArenaEnvironment:
         observation[cursor + 9] = self.chests_opened / 12.0
         observation[cursor + 10] = self.bosses_defeated / 2.0
         observation[cursor + 11] = float(self.gate_open)
+        gate_dx, gate_dy, gate_distance = self._objective_vector(agent_id, [self.current_floor.gate_position])
+        chest_dx, chest_dy, chest_distance = self._objective_vector(agent_id, list(self.chest_lookup))
+        boss_targets = [
+            enemy.position
+            for enemy in self.enemy_states
+            if enemy.alive and enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}
+        ]
+        boss_dx, boss_dy, boss_distance = self._objective_vector(agent_id, boss_targets)
+        observation[cursor + 12] = gate_dx
+        observation[cursor + 13] = gate_dy
+        observation[cursor + 14] = gate_distance
+        observation[cursor + 15] = chest_dx
+        observation[cursor + 16] = chest_dy
+        observation[cursor + 17] = chest_distance
+        observation[cursor + 18] = boss_dx
+        observation[cursor + 19] = boss_dy
+        observation[cursor + 20] = boss_distance
         return observation
 
     def _encode_window(
@@ -631,7 +707,7 @@ class ArenaEnvironment:
     def _display_distance(self, distance: int | None) -> int:
         return int(distance) if distance is not None else -1
 
-    def _reset_objective_tracking(self) -> None:
+    def _reset_objective_tracking(self, reset_episode_tracking: bool = False) -> None:
         gate_distance = self._closest_distance([self.current_floor.gate_position])
         chest_distance = self._closest_distance(list(self.chest_lookup))
         boss_targets = [
@@ -646,6 +722,30 @@ class ArenaEnvironment:
         self.best_gate_distance = self.closest_gate_distance
         self.best_chest_distance = self.closest_chest_distance
         self.best_boss_distance = self.closest_boss_distance
+        if reset_episode_tracking or self.best_gate_distance_reached < 0:
+            self.best_gate_distance_reached = self.closest_gate_distance
+        elif self.closest_gate_distance >= 0:
+            self.best_gate_distance_reached = min(self.best_gate_distance_reached, self.closest_gate_distance)
+
+    def _objective_vector(self, agent_id: int, targets: list[tuple[int, int]]) -> tuple[float, float, float]:
+        if not targets:
+            return 0.0, 0.0, 0.0
+        origin = tuple(int(value) for value in self.positions[agent_id])
+        target = min(targets, key=lambda candidate: self._manhattan_distance(origin, candidate))
+        scale = max(1.0, float(self.grid_size - 1))
+        distance_scale = max(1.0, float((self.grid_size - 1) * 2))
+        dx = float(target[0] - origin[0]) / scale
+        dy = float(target[1] - origin[1]) / scale
+        distance = float(self._manhattan_distance(origin, target)) / distance_scale
+        return dx, dy, distance
+
+    def _count_gate_occupants(self) -> int:
+        return sum(
+            1
+            for agent_id in range(self.population_size)
+            if self.alive[agent_id]
+            and tuple(int(value) for value in self.positions[agent_id]) == self.current_floor.gate_position
+        )
 
     def _distance(self, origin: tuple[int, int], target: tuple[int, int]) -> int:
         return max(abs(origin[0] - target[0]), abs(origin[1] - target[1]))

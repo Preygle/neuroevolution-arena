@@ -161,8 +161,21 @@ class ArenaSimulation:
                 floor_reached = np.asarray([metric.floor_reached for metric in metrics], dtype=np.float32)
                 bosses = np.asarray([metric.bosses_defeated for metric in metrics], dtype=np.float32)
                 chests = np.asarray([metric.chests_opened for metric in metrics], dtype=np.float32)
+                powerups = np.asarray([metric.powerups_picked for metric in metrics], dtype=np.float32)
+                damage_powerups = np.asarray([metric.damage_powerups for metric in metrics], dtype=np.float32)
+                range_powerups = np.asarray([metric.range_powerups for metric in metrics], dtype=np.float32)
+                speed_powerups = np.asarray([metric.speed_powerups for metric in metrics], dtype=np.float32)
+                diagonal_powerups = np.asarray([metric.diagonal_powerups for metric in metrics], dtype=np.float32)
+                vitality_powerups = np.asarray([metric.vitality_powerups for metric in metrics], dtype=np.float32)
                 damage = np.asarray([metric.damage_dealt for metric in metrics], dtype=np.float32)
                 gate_distance = np.asarray([metric.gate_distance for metric in metrics], dtype=np.float32)
+                best_gate_distance = np.asarray([metric.best_gate_distance for metric in metrics], dtype=np.float32)
+                gate_tile_visits = np.asarray([metric.gate_tile_visits for metric in metrics], dtype=np.float32)
+                use_gate_attempts = np.asarray([metric.use_gate_attempts for metric in metrics], dtype=np.float32)
+                invalid_use_gate_attempts = np.asarray(
+                    [metric.invalid_use_gate_attempts for metric in metrics],
+                    dtype=np.float32,
+                )
                 victories = np.asarray([metric.victory for metric in metrics], dtype=np.float32)
                 champion_id = int(np.argmax(fitness))
 
@@ -183,8 +196,18 @@ class ArenaSimulation:
                     mean_floor_reached=float(floor_reached.mean()),
                     mean_bosses_defeated=float(bosses.mean()),
                     mean_chests_opened=float(chests.mean()),
+                    mean_powerups_picked=float(powerups.mean()),
+                    mean_damage_powerups=float(damage_powerups.mean()),
+                    mean_range_powerups=float(range_powerups.mean()),
+                    mean_speed_powerups=float(speed_powerups.mean()),
+                    mean_diagonal_powerups=float(diagonal_powerups.mean()),
+                    mean_vitality_powerups=float(vitality_powerups.mean()),
                     mean_damage=float(damage.mean()),
                     mean_gate_distance=float(gate_distance.mean()),
+                    mean_best_gate_distance=float(best_gate_distance.mean()),
+                    mean_gate_tile_visits=float(gate_tile_visits.mean()),
+                    mean_use_gate_attempts=float(use_gate_attempts.mean()),
+                    mean_invalid_use_gate_attempts=float(invalid_use_gate_attempts.mean()),
                     success_rate=float(victories.mean()),
                     champion_id=champion_id,
                     elite_ids=elite_ids,
@@ -217,7 +240,9 @@ class ArenaSimulation:
             f"Step {step_batch.info['current_step']}/{step_batch.info['episode_step_limit']}",
             f"Floor {step_batch.info['floor_index']}: {step_batch.info['floor_name']}",
             f"Alive {step_batch.info['alive_count']}",
-            f"Gate {step_batch.info['closest_gate_distance']}",
+            f"Gate {step_batch.info['closest_gate_distance']} | Best {step_batch.info['best_gate_distance']}",
+            f"Chest {step_batch.info['chests_opened']} | Pwr {step_batch.info['powerups_picked']}",
+            f"GUse {step_batch.info['use_gate_attempts']} | Bad {step_batch.info['invalid_use_gate_attempts']}",
             f"Idle {step_batch.info['steps_since_progress']}",
         ]
 
@@ -292,14 +317,26 @@ class ArenaSimulation:
                 AgentMetrics(
                     agent_id=agent_id,
                     reward=float(np.mean([metric.reward for metric in agent_metrics])),
-                    survival_steps=int(round(np.mean([metric.survival_steps for metric in agent_metrics]))),
-                    floor_reached=int(round(np.mean([metric.floor_reached for metric in agent_metrics]))),
-                    bosses_defeated=int(round(np.mean([metric.bosses_defeated for metric in agent_metrics]))),
-                    chests_opened=int(round(np.mean([metric.chests_opened for metric in agent_metrics]))),
+                    survival_steps=float(np.mean([metric.survival_steps for metric in agent_metrics])),
+                    floor_reached=float(np.mean([metric.floor_reached for metric in agent_metrics])),
+                    bosses_defeated=float(np.mean([metric.bosses_defeated for metric in agent_metrics])),
+                    chests_opened=float(np.mean([metric.chests_opened for metric in agent_metrics])),
                     damage_dealt=float(np.mean([metric.damage_dealt for metric in agent_metrics])),
                     gate_distance=float(np.mean([metric.gate_distance for metric in agent_metrics])),
                     fitness=float(np.mean([metric.fitness for metric in agent_metrics])),
-                    victory=int(round(np.mean([metric.victory for metric in agent_metrics]))),
+                    victory=float(np.mean([metric.victory for metric in agent_metrics])),
+                    powerups_picked=float(np.mean([metric.powerups_picked for metric in agent_metrics])),
+                    damage_powerups=float(np.mean([metric.damage_powerups for metric in agent_metrics])),
+                    range_powerups=float(np.mean([metric.range_powerups for metric in agent_metrics])),
+                    speed_powerups=float(np.mean([metric.speed_powerups for metric in agent_metrics])),
+                    diagonal_powerups=float(np.mean([metric.diagonal_powerups for metric in agent_metrics])),
+                    vitality_powerups=float(np.mean([metric.vitality_powerups for metric in agent_metrics])),
+                    best_gate_distance=float(np.mean([metric.best_gate_distance for metric in agent_metrics])),
+                    gate_tile_visits=float(np.mean([metric.gate_tile_visits for metric in agent_metrics])),
+                    use_gate_attempts=float(np.mean([metric.use_gate_attempts for metric in agent_metrics])),
+                    invalid_use_gate_attempts=float(
+                        np.mean([metric.invalid_use_gate_attempts for metric in agent_metrics])
+                    ),
                 )
             )
         return aggregated
@@ -342,8 +379,18 @@ class ArenaSimulation:
                     "mean_floor_reached",
                     "mean_bosses_defeated",
                     "mean_chests_opened",
+                    "mean_powerups_picked",
+                    "mean_damage_powerups",
+                    "mean_range_powerups",
+                    "mean_speed_powerups",
+                    "mean_diagonal_powerups",
+                    "mean_vitality_powerups",
                     "mean_damage",
                     "mean_gate_distance",
+                    "mean_best_gate_distance",
+                    "mean_gate_tile_visits",
+                    "mean_use_gate_attempts",
+                    "mean_invalid_use_gate_attempts",
                     "success_rate",
                     "champion_id",
                     "elite_ids",
@@ -360,8 +407,18 @@ class ArenaSimulation:
                         row.mean_floor_reached,
                         row.mean_bosses_defeated,
                         row.mean_chests_opened,
+                        row.mean_powerups_picked,
+                        row.mean_damage_powerups,
+                        row.mean_range_powerups,
+                        row.mean_speed_powerups,
+                        row.mean_diagonal_powerups,
+                        row.mean_vitality_powerups,
                         row.mean_damage,
                         row.mean_gate_distance,
+                        row.mean_best_gate_distance,
+                        row.mean_gate_tile_visits,
+                        row.mean_use_gate_attempts,
+                        row.mean_invalid_use_gate_attempts,
                         row.success_rate,
                         row.champion_id,
                         " ".join(str(elite_id) for elite_id in row.elite_ids),
@@ -422,8 +479,18 @@ class ArenaSimulation:
                 mean_floor_reached=row["mean_floor_reached"],
                 mean_bosses_defeated=row["mean_bosses_defeated"],
                 mean_chests_opened=row["mean_chests_opened"],
+                mean_powerups_picked=row.get("mean_powerups_picked", row.get("mean_chests_opened", 0.0)),
+                mean_damage_powerups=row.get("mean_damage_powerups", 0.0),
+                mean_range_powerups=row.get("mean_range_powerups", 0.0),
+                mean_speed_powerups=row.get("mean_speed_powerups", 0.0),
+                mean_diagonal_powerups=row.get("mean_diagonal_powerups", 0.0),
+                mean_vitality_powerups=row.get("mean_vitality_powerups", 0.0),
                 mean_damage=row.get("mean_damage", 0.0),
                 mean_gate_distance=row.get("mean_gate_distance", 0.0),
+                mean_best_gate_distance=row.get("mean_best_gate_distance", row.get("mean_gate_distance", 0.0)),
+                mean_gate_tile_visits=row.get("mean_gate_tile_visits", 0.0),
+                mean_use_gate_attempts=row.get("mean_use_gate_attempts", 0.0),
+                mean_invalid_use_gate_attempts=row.get("mean_invalid_use_gate_attempts", 0.0),
                 success_rate=row.get("success_rate", 0.0),
                 champion_id=row["champion_id"],
                 elite_ids=row["elite_ids"],
@@ -497,6 +564,52 @@ class ArenaSimulation:
             f"{summary.mean_bosses_defeated:>4.2f}  "
             f"{win_pct:>4.1f}%  "
             f"P{summary.champion_id:>3}  "
+            f"{elapsed:>5.1f}s"
+            f"  {new_best}"
+        )
+
+    def _print_training_banner(self, total_generations: int) -> None:
+        device = self.config.device
+        sep = "=" * 64
+        print(sep)
+        print("  Neuroevolution Arena - Training")
+        print(sep)
+        print(
+            f"  Generations     : {self.start_generation} -> {total_generations}  "
+            f"(remaining: {total_generations - self.start_generation})"
+        )
+        print(f"  Instances       : {self.instance_count}  |  Workers: {self.worker_count}")
+        print(f"  Population size : {self.config.population_size}")
+        print(f"  Device          : {device}")
+        print(f"  Seed            : {self.seed}")
+        print(sep)
+        print(
+            f"  {'Gen':>9}  {'BestFit':>9}  {'Reward':>8}  {'Floor':>5}  "
+            f"{'Surv':>5}  {'Gate':>5}  {'BestG':>5}  {'GTile':>5}  {'Chest':>5}  {'Pwr':>5}  {'BadG':>5}  {'s/gen':>6}"
+        )
+        print("  " + "-" * 111)
+
+    def _print_generation_progress(
+        self,
+        summary: GenerationSummary,
+        total_generations: int,
+        elapsed: float,
+    ) -> None:
+        gen_str = f"{summary.generation + 1}/{total_generations}"
+        win_pct = summary.success_rate * 100.0
+        new_best = "*" if summary.best_fitness >= self.best_fitness else " "
+        print(
+            f"  {gen_str:>9}  "
+            f"{summary.best_fitness:>9.1f}  "
+            f"{summary.mean_reward:>8.1f}  "
+            f"{summary.mean_floor_reached:>5.2f}  "
+            f"{summary.mean_survival:>5.0f}  "
+            f"{summary.mean_gate_distance:>5.1f}  "
+            f"{summary.mean_best_gate_distance:>5.1f}  "
+            f"{summary.mean_gate_tile_visits:>5.2f}  "
+            f"{summary.mean_chests_opened:>5.2f}  "
+            f"{summary.mean_powerups_picked:>5.2f}  "
+            f"{summary.mean_invalid_use_gate_attempts:>5.2f}  "
             f"{elapsed:>5.1f}s"
             f"  {new_best}"
         )

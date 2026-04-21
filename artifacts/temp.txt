@@ -1,3 +1,8 @@
   py -3 scripts/train.py --generations 10000 --instances 128 --seed 42 --name 128ins --checkpoint-interval 1
 
   py -3 scripts/train.py --generations 10000 --instances 32 --checkpoint-interval 5
+
+
+
+py -3 scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v1 --checkpoint-interval 5 
+py -3 scripts/train.py --generations 10000 --instances 32 --seed 42 --name 32v2 --checkpoint-interval 5 

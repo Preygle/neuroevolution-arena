@@ -17,6 +17,8 @@ def plot_training_metrics(history: list[GenerationSummary], output_path: str | P
     bosses = [entry.mean_bosses_defeated for entry in history]
     chests = [entry.mean_chests_opened for entry in history]
     gate_distance = [entry.mean_gate_distance for entry in history]
+    best_gate_distance = [entry.mean_best_gate_distance for entry in history]
+    gate_tile_visits = [entry.mean_gate_tile_visits for entry in history]
     success_rate = [entry.success_rate for entry in history]
 
     figure, axes = plt.subplots(5, 1, figsize=(10, 18), sharex=True)
@@ -36,13 +38,17 @@ def plot_training_metrics(history: list[GenerationSummary], output_path: str | P
     axes[2].legend()
     axes[2].grid(alpha=0.3)
 
-    axes[3].plot(generations, gate_distance, color="#8c564b", linewidth=2.0)
+    axes[3].plot(generations, gate_distance, color="#8c564b", linewidth=2.0, label="end gate")
+    axes[3].plot(generations, best_gate_distance, color="#bcbd22", linewidth=1.8, label="best gate")
     axes[3].set_ylabel("gate dist")
+    axes[3].legend()
     axes[3].grid(alpha=0.3)
 
-    axes[4].plot(generations, success_rate, color="#9467bd", linewidth=2.0)
-    axes[4].set_ylabel("success")
+    axes[4].plot(generations, success_rate, color="#9467bd", linewidth=2.0, label="success")
+    axes[4].plot(generations, gate_tile_visits, color="#17becf", linewidth=1.8, label="gate tiles")
+    axes[4].set_ylabel("success / gate")
     axes[4].set_xlabel("generation")
+    axes[4].legend()
     axes[4].grid(alpha=0.3)
 
     output = Path(output_path)

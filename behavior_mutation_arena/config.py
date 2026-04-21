@@ -71,7 +71,7 @@ ENEMY_STATS = {
 
 @dataclass
 class ArenaConfig:
-    environment_name: str = "dungeon_crawler_training_v1"
+    environment_name: str = "dungeon_crawler_training_v2"
     grid_size: int = 36
     population_size: int = 5
     num_floors: int = 10
@@ -104,6 +104,7 @@ class ArenaConfig:
     victory_reward: float = 260.0
     death_penalty: float = -12.0
     team_wipe_penalty: float = -80.0
+    invalid_gate_action_penalty: float = -1.0
     no_progress_penalty_interval: int = 12
     no_progress_penalty: float = -4.0
     no_progress_patience: int = 28
@@ -142,6 +143,7 @@ class ArenaConfig:
     render_fps: int = 30
     seed: int = 7
     device: str = "cpu"
+    auto_use_gate: bool = True
 
     @property
     def action_size(self) -> int:
@@ -153,7 +155,7 @@ class ArenaConfig:
 
     @property
     def scalar_feature_count(self) -> int:
-        return 12
+        return 21
 
     @property
     def observation_dim(self) -> int:

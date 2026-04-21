@@ -48,7 +48,7 @@ def main() -> None:
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     config = config_from_checkpoint(checkpoint)
     device = torch.device(args.device or config.device)
-    if config.environment_name != "dungeon_crawler_training_v1":
+    if config.environment_name != "dungeon_crawler_training_v2":
         raise SystemExit(
             "checkpoint environment does not match the dungeon crawler branch; "
             "train a new checkpoint or pass a dungeon checkpoint explicitly"
@@ -68,7 +68,17 @@ def main() -> None:
     floor_reached: list[float] = []
     bosses: list[float] = []
     chests: list[float] = []
+    powerups: list[float] = []
+    damage_powerups: list[float] = []
+    range_powerups: list[float] = []
+    speed_powerups: list[float] = []
+    diagonal_powerups: list[float] = []
+    vitality_powerups: list[float] = []
     gate_distance: list[float] = []
+    best_gate_distance: list[float] = []
+    gate_tile_visits: list[float] = []
+    use_gate_attempts: list[float] = []
+    invalid_use_gate_attempts: list[float] = []
     victories: list[float] = []
 
     for episode in range(args.episodes):
@@ -84,7 +94,17 @@ def main() -> None:
         floor_reached.append(stats.mean(metric.floor_reached for metric in metrics))
         bosses.append(stats.mean(metric.bosses_defeated for metric in metrics))
         chests.append(stats.mean(metric.chests_opened for metric in metrics))
+        powerups.append(stats.mean(metric.powerups_picked for metric in metrics))
+        damage_powerups.append(stats.mean(metric.damage_powerups for metric in metrics))
+        range_powerups.append(stats.mean(metric.range_powerups for metric in metrics))
+        speed_powerups.append(stats.mean(metric.speed_powerups for metric in metrics))
+        diagonal_powerups.append(stats.mean(metric.diagonal_powerups for metric in metrics))
+        vitality_powerups.append(stats.mean(metric.vitality_powerups for metric in metrics))
         gate_distance.append(stats.mean(metric.gate_distance for metric in metrics))
+        best_gate_distance.append(stats.mean(metric.best_gate_distance for metric in metrics))
+        gate_tile_visits.append(stats.mean(metric.gate_tile_visits for metric in metrics))
+        use_gate_attempts.append(stats.mean(metric.use_gate_attempts for metric in metrics))
+        invalid_use_gate_attempts.append(stats.mean(metric.invalid_use_gate_attempts for metric in metrics))
         victories.append(stats.mean(metric.victory for metric in metrics))
 
     print(f"episodes={args.episodes}")
@@ -92,7 +112,20 @@ def main() -> None:
     print(f"floor_reached={stats.mean(floor_reached):.2f}")
     print(f"bosses_defeated={stats.mean(bosses):.2f}")
     print(f"chests_opened={stats.mean(chests):.2f}")
+    print(f"powerups_picked={stats.mean(powerups):.2f}")
+    print(
+        "powerup_breakdown="
+        f"D:{stats.mean(damage_powerups):.2f} "
+        f"R:{stats.mean(range_powerups):.2f} "
+        f"S:{stats.mean(speed_powerups):.2f} "
+        f"X:{stats.mean(diagonal_powerups):.2f} "
+        f"V:{stats.mean(vitality_powerups):.2f}"
+    )
     print(f"gate_distance={stats.mean(gate_distance):.2f}")
+    print(f"best_gate_distance={stats.mean(best_gate_distance):.2f}")
+    print(f"gate_tile_visits={stats.mean(gate_tile_visits):.2f}")
+    print(f"use_gate_attempts={stats.mean(use_gate_attempts):.2f}")
+    print(f"invalid_use_gate_attempts={stats.mean(invalid_use_gate_attempts):.2f}")
     print(f"victory_rate={stats.mean(victories):.2f}")
 
 

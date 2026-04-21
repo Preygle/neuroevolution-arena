@@ -10,14 +10,24 @@ import numpy as np
 class AgentMetrics:
     agent_id: int
     reward: float
-    survival_steps: int
-    floor_reached: int
-    bosses_defeated: int
-    chests_opened: int
+    survival_steps: float
+    floor_reached: float
+    bosses_defeated: float
+    chests_opened: float
     damage_dealt: float
     gate_distance: float
     fitness: float
-    victory: int = 0
+    victory: float = 0.0
+    powerups_picked: float = 0.0
+    damage_powerups: float = 0.0
+    range_powerups: float = 0.0
+    speed_powerups: float = 0.0
+    diagonal_powerups: float = 0.0
+    vitality_powerups: float = 0.0
+    best_gate_distance: float = 0.0
+    gate_tile_visits: float = 0.0
+    use_gate_attempts: float = 0.0
+    invalid_use_gate_attempts: float = 0.0
 
 
 @dataclass
@@ -41,6 +51,16 @@ class GenerationSummary:
     mean_chests_opened: float
     mean_damage: float
     mean_gate_distance: float
+    mean_best_gate_distance: float
+    mean_gate_tile_visits: float
+    mean_use_gate_attempts: float
+    mean_invalid_use_gate_attempts: float
     success_rate: float
     champion_id: int
     elite_ids: list[int]
+    mean_powerups_picked: float = 0.0
+    mean_damage_powerups: float = 0.0
+    mean_range_powerups: float = 0.0
+    mean_speed_powerups: float = 0.0
+    mean_diagonal_powerups: float = 0.0
+    mean_vitality_powerups: float = 0.0

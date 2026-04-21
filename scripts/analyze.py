@@ -81,6 +81,7 @@ def load_metrics(csv_path: Path) -> list[dict]:
         reader = csv.DictReader(fh)
         for row in reader:
             try:
+                row = {(key.lstrip("\ufeff") if key else key): value for key, value in row.items()}
                 parsed = {
                     "generation":           int(row["generation"]),
                     "best_fitness":         float(row["best_fitness"]),
@@ -90,8 +91,13 @@ def load_metrics(csv_path: Path) -> list[dict]:
                     "mean_floor_reached":   float(row["mean_floor_reached"]),
                     "mean_bosses_defeated": float(row["mean_bosses_defeated"]),
                     "mean_chests_opened":   float(row["mean_chests_opened"]),
+                    "mean_powerups_picked": float(row.get("mean_powerups_picked", row.get("mean_chests_opened", 0.0)) or 0.0),
                     "mean_damage":          float(row.get("mean_damage", 0.0) or 0.0),
                     "mean_gate_distance":   float(row.get("mean_gate_distance", 0.0) or 0.0),
+                    "mean_best_gate_distance": float(row.get("mean_best_gate_distance", row.get("mean_gate_distance", 0.0)) or 0.0),
+                    "mean_gate_tile_visits": float(row.get("mean_gate_tile_visits", 0.0) or 0.0),
+                    "mean_use_gate_attempts": float(row.get("mean_use_gate_attempts", 0.0) or 0.0),
+                    "mean_invalid_use_gate_attempts": float(row.get("mean_invalid_use_gate_attempts", 0.0) or 0.0),
                     "success_rate":         float(row.get("success_rate", 0.0) or 0.0),
                     "champion_id":          int(row["champion_id"]),
                 }
@@ -138,6 +144,10 @@ def write_summary_txt(rows: list[dict], dest: Path, source_csv: Path) -> None:
         fh.write(f"    Mean survival  : {last['mean_survival']:.0f} steps\n")
         fh.write(f"    Mean bosses    : {last['mean_bosses_defeated']:.2f}\n")
         fh.write(f"    Mean chests    : {last['mean_chests_opened']:.2f}\n")
+        fh.write(f"    Mean powerups  : {last['mean_powerups_picked']:.2f}\n")
+        fh.write(f"    Best gate dist : {last['mean_best_gate_distance']:.2f}\n")
+        fh.write(f"    Gate visits    : {last['mean_gate_tile_visits']:.2f}\n")
+        fh.write(f"    Bad gate acts  : {last['mean_invalid_use_gate_attempts']:.2f}\n")
         fh.write(f"    Win rate       : {last['success_rate'] * 100:.1f}%\n")
         fh.write(f"    Champion agent : P{last['champion_id']}\n")
         fh.write("\n")
@@ -191,6 +201,8 @@ def plot_full(rows: list[dict], dest: Path) -> None:
     bosses          = [r["mean_bosses_defeated"] for r in rows]
     chests          = [r["mean_chests_opened"] for r in rows]
     gate_dist       = [r["mean_gate_distance"] for r in rows]
+    best_gate_dist  = [r["mean_best_gate_distance"] for r in rows]
+    gate_visits     = [r["mean_gate_tile_visits"] for r in rows]
     success_rate    = [r["success_rate"] for r in rows]
     mean_survival   = [r["mean_survival"] for r in rows]
 
@@ -222,13 +234,16 @@ def plot_full(rows: list[dict], dest: Path) -> None:
     axes[2].grid(True)
 
     # Gate distance
-    axes[3].plot(gens, _smooth(gate_dist), color="#c49bff", linewidth=2.0)
+    axes[3].plot(gens, _smooth(gate_dist), color="#c49bff", linewidth=2.0, label="end gate")
+    axes[3].plot(gens, _smooth(best_gate_dist), color="#bcbd22", linewidth=1.5, label="best gate")
     axes[3].set_ylabel("Gate Distance")
+    axes[3].legend(loc="upper right")
     axes[3].grid(True)
 
     # Win rate + survival
     ax3b = axes[4].twinx()
     axes[4].plot(gens, _smooth(success_rate), color="#ffd966", linewidth=2.2, label="win rate")
+    axes[4].plot(gens, _smooth(gate_visits), color="#17becf", linewidth=1.4, alpha=0.85, label="gate visits")
     ax3b.plot(gens, _smooth(mean_survival), color="#7bafd4", linewidth=1.5, alpha=0.7, label="survival steps")
     axes[4].set_ylabel("Win Rate", color="#ffd966")
     ax3b.set_ylabel("Survival Steps", color="#7bafd4")
