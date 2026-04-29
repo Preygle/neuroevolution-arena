@@ -71,7 +71,7 @@ ENEMY_STATS = {
 
 @dataclass
 class ArenaConfig:
-    environment_name: str = "dungeon_crawler_training_v2"
+    environment_name: str = "dungeon_crawler_training_v3"
     grid_size: int = 36
     population_size: int = 5
     num_floors: int = 10
@@ -93,12 +93,13 @@ class ArenaConfig:
     attack_base_damage: float = 6.0
     attack_damage_reward_scale: float = 0.75
     step_penalty: float = -0.03
-    gate_distance_reward_scale: float = 1.2
+    hazard_reward_penalty: float = -0.12
+    gate_distance_reward_scale: float = 1.5
     chest_distance_reward_scale: float = 0.2
     boss_distance_reward_scale: float = 0.65
-    chest_reward: float = 10.0
-    gate_reward: float = 35.0
-    floor_clear_reward: float = 60.0
+    chest_reward: float = 6.0
+    gate_reward: float = 65.0
+    floor_clear_reward: float = 85.0
     mini_boss_reward: float = 60.0
     final_boss_reward: float = 180.0
     victory_reward: float = 260.0
@@ -109,12 +110,12 @@ class ArenaConfig:
     no_progress_penalty: float = -4.0
     no_progress_patience: int = 28
     no_progress_termination_penalty: float = -16.0
-    floor_progress_weight: float = 42.0
+    floor_progress_weight: float = 60.0
     boss_weight: float = 72.0
-    chest_weight: float = 4.0
+    chest_weight: float = 2.0
     victory_weight: float = 220.0
     damage_weight: float = 0.18
-    survival_weight: float = 0.05
+    survival_weight: float = 0.03
     hidden_size: int = 256
     ppo_learning_rate: float = 3e-4
     ppo_clip: float = 0.2
@@ -144,6 +145,7 @@ class ArenaConfig:
     seed: int = 7
     device: str = "cpu"
     auto_use_gate: bool = True
+    gate_interaction_radius: int = 1
 
     @property
     def action_size(self) -> int:

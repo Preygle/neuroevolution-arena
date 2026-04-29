@@ -10,7 +10,11 @@ from behavior_mutation_arena.config import EnemyKind, PowerUpType
 @dataclass(frozen=True)
 class ChestSpawn:
     position: tuple[int, int]
-    powerup: PowerUpType
+    powerups: tuple[PowerUpType, ...]
+
+    @property
+    def powerup(self) -> PowerUpType:
+        return self.powerups[0]
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,10 @@ def _paint_zone(layer: np.ndarray, top: int, left: int, bottom: int, right: int)
     layer[top:bottom, left:right] = True
 
 
+def _clear_zone(layer: np.ndarray, top: int, left: int, bottom: int, right: int) -> None:
+    layer[top:bottom, left:right] = False
+
+
 def _verdant_entry(grid_size: int) -> DungeonFloor:
     terrain, slow, hazard, heal = _blank_layers(grid_size)
     _carve_room(terrain, 1, 1, 7, 8)
@@ -106,8 +114,8 @@ def _verdant_entry(grid_size: int) -> DungeonFloor:
         gate_position=(32, 32),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((5, 20), PowerUpType.VITALITY),
-            ChestSpawn((22, 19), PowerUpType.DAMAGE),
+            ChestSpawn((5, 20), (PowerUpType.VITALITY, PowerUpType.DAMAGE)),
+            ChestSpawn((22, 19), (PowerUpType.DAMAGE, PowerUpType.VITALITY)),
         ),
         enemies=(
             EnemySpawn((20, 21), EnemyKind.SKIRMISHER),
@@ -138,8 +146,8 @@ def _glacier_pass(grid_size: int) -> DungeonFloor:
         gate_position=(32, 31),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((16, 6), PowerUpType.SPEED),
-            ChestSpawn((16, 27), PowerUpType.DIAGONAL),
+            ChestSpawn((16, 6), (PowerUpType.SPEED, PowerUpType.VITALITY)),
+            ChestSpawn((16, 27), (PowerUpType.DIAGONAL, PowerUpType.SPEED)),
         ),
         enemies=(
             EnemySpawn((16, 19), EnemyKind.ARCHER),
@@ -161,6 +169,9 @@ def _ember_forges(grid_size: int) -> DungeonFloor:
     _carve_room(terrain, 28, 26, 35, 35)
     _paint_zone(hazard, 16, 11, 26, 21)
     _paint_zone(hazard, 15, 29, 24, 34)
+    _clear_zone(hazard, 19, 15, 22, 34)
+    _clear_zone(hazard, 28, 31, 34, 34)
+    _paint_zone(heal, 21, 30, 23, 34)
     return DungeonFloor(
         index=3,
         name="Ember Forges",
@@ -172,13 +183,13 @@ def _ember_forges(grid_size: int) -> DungeonFloor:
         gate_position=(32, 32),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((5, 16), PowerUpType.DAMAGE),
-            ChestSpawn((19, 32), PowerUpType.RANGE),
+            ChestSpawn((5, 16), (PowerUpType.DAMAGE, PowerUpType.VITALITY)),
+            ChestSpawn((19, 32), (PowerUpType.RANGE, PowerUpType.SPEED)),
         ),
         enemies=(
             EnemySpawn((19, 16), EnemyKind.SKIRMISHER),
             EnemySpawn((19, 30), EnemyKind.ARCHER),
-            EnemySpawn((30, 31), EnemyKind.SKIRMISHER),
+            EnemySpawn((29, 30), EnemyKind.SKIRMISHER),
         ),
     )
 
@@ -207,8 +218,8 @@ def _cryptic_stacks(grid_size: int) -> DungeonFloor:
         gate_position=(30, 33),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((20, 5), PowerUpType.VITALITY),
-            ChestSpawn((18, 23), PowerUpType.SPEED),
+            ChestSpawn((20, 5), (PowerUpType.VITALITY, PowerUpType.DAMAGE)),
+            ChestSpawn((18, 23), (PowerUpType.SPEED, PowerUpType.RANGE)),
         ),
         enemies=(
             EnemySpawn((20, 17), EnemyKind.ARCHER),
@@ -238,8 +249,8 @@ def _warden_keep(grid_size: int) -> DungeonFloor:
         gate_position=(31, 32),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((5, 18), PowerUpType.DAMAGE),
-            ChestSpawn((8, 30), PowerUpType.RANGE),
+            ChestSpawn((5, 18), (PowerUpType.DAMAGE, PowerUpType.VITALITY)),
+            ChestSpawn((8, 30), (PowerUpType.RANGE, PowerUpType.SPEED)),
         ),
         enemies=(
             EnemySpawn((12, 29), EnemyKind.ARCHER),
@@ -273,8 +284,8 @@ def _swamp_descent(grid_size: int) -> DungeonFloor:
         gate_position=(30, 33),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((15, 6), PowerUpType.VITALITY),
-            ChestSpawn((15, 21), PowerUpType.DIAGONAL),
+            ChestSpawn((15, 6), (PowerUpType.VITALITY, PowerUpType.DAMAGE)),
+            ChestSpawn((15, 21), (PowerUpType.DIAGONAL, PowerUpType.SPEED)),
         ),
         enemies=(
             EnemySpawn((16, 18), EnemyKind.SKIRMISHER),
@@ -307,8 +318,8 @@ def _crystal_caverns(grid_size: int) -> DungeonFloor:
         gate_position=(31, 10),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((5, 22), PowerUpType.RANGE),
-            ChestSpawn((23, 9), PowerUpType.SPEED),
+            ChestSpawn((5, 22), (PowerUpType.RANGE, PowerUpType.DAMAGE)),
+            ChestSpawn((23, 9), (PowerUpType.SPEED, PowerUpType.VITALITY)),
         ),
         enemies=(
             EnemySpawn((20, 22), EnemyKind.ARCHER),
@@ -340,8 +351,8 @@ def _storm_bastion(grid_size: int) -> DungeonFloor:
         gate_position=(31, 31),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((17, 5), PowerUpType.DAMAGE),
-            ChestSpawn((17, 26), PowerUpType.DIAGONAL),
+            ChestSpawn((17, 5), (PowerUpType.DAMAGE, PowerUpType.VITALITY)),
+            ChestSpawn((17, 26), (PowerUpType.DIAGONAL, PowerUpType.RANGE)),
         ),
         enemies=(
             EnemySpawn((17, 16), EnemyKind.ARCHER),
@@ -375,8 +386,8 @@ def _inferno_ascent(grid_size: int) -> DungeonFloor:
         gate_position=(32, 32),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((5, 18), PowerUpType.DAMAGE),
-            ChestSpawn((20, 32), PowerUpType.VITALITY),
+            ChestSpawn((5, 18), (PowerUpType.DAMAGE, PowerUpType.RANGE)),
+            ChestSpawn((20, 32), (PowerUpType.VITALITY, PowerUpType.SPEED)),
         ),
         enemies=(
             EnemySpawn((20, 18), EnemyKind.SKIRMISHER),
@@ -408,8 +419,8 @@ def _abyss_throne(grid_size: int) -> DungeonFloor:
         gate_position=(31, 31),
         start_positions=_start_positions(),
         chests=(
-            ChestSpawn((8, 23), PowerUpType.SPEED),
-            ChestSpawn((8, 32), PowerUpType.RANGE),
+            ChestSpawn((8, 23), (PowerUpType.SPEED, PowerUpType.VITALITY)),
+            ChestSpawn((8, 32), (PowerUpType.RANGE, PowerUpType.DAMAGE)),
         ),
         enemies=(
             EnemySpawn((10, 31), EnemyKind.ARCHER),

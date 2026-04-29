@@ -48,7 +48,7 @@ def main() -> None:
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     config = config_from_checkpoint(checkpoint)
     device = torch.device(args.device or config.device)
-    if config.environment_name != "dungeon_crawler_training_v2":
+    if config.environment_name != "dungeon_crawler_training_v3":
         raise SystemExit(
             "checkpoint environment does not match the dungeon crawler branch; "
             "train a new checkpoint or pass a dungeon checkpoint explicitly"

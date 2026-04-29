@@ -1,6 +1,6 @@
 # Dungeon Crawler Team RL
 
-This branch turns the old arena experiment into a fixed-layout cooperative dungeon campaign. A five-agent team starts from a known spawn, climbs through ten handcrafted floors, opens chests for permanent team buffs, defeats minibosses on floor 5 and floor 10, and learns route quality rather than surviving on random map luck.
+This branch turns the old arena experiment into a fixed-layout cooperative dungeon campaign. A five-agent team starts from a known spawn, climbs through ten handcrafted floors, opens chests for persistent power-ups, defeats minibosses on floor 5 and floor 10, and learns route quality rather than surviving on random map luck.
 
 The Python package name is still `behavior_mutation_arena` for continuity, but the active project on `dungeon-crawler-training` is a dungeon crawler training stack.
 
@@ -26,6 +26,32 @@ This branch replaces that setup with static floors, fixed starts, deterministic 
 - Boss cadence: miniboss on floor `5`, final boss on floor `10`
 - Goal: learn the best chest path, combat pacing, and boss-clear route that leads to a full clear
 
+## Floor gallery
+
+The dungeon is intentionally static so policies can repeatedly practice the same route, risk, and power-up decisions. The floor images below are exported from the same fixed floor definitions used by training.
+
+![All dungeon floors contact sheet](static/floors/all_floors_contact_sheet.png)
+
+| Floor 1 | Floor 2 |
+|---|---|
+| ![Floor 01 Verdant Entry](static/floors/floor_01_verdant_entry.png) | ![Floor 02 Glacier Pass](static/floors/floor_02_glacier_pass.png) |
+
+| Floor 3 | Floor 4 |
+|---|---|
+| ![Floor 03 Ember Forges](static/floors/floor_03_ember_forges.png) | ![Floor 04 Cryptic Stacks](static/floors/floor_04_cryptic_stacks.png) |
+
+| Floor 5 | Floor 6 |
+|---|---|
+| ![Floor 05 Warden Keep](static/floors/floor_05_warden_keep.png) | ![Floor 06 Swamp Descent](static/floors/floor_06_swamp_descent.png) |
+
+| Floor 7 | Floor 8 |
+|---|---|
+| ![Floor 07 Crystal Caverns](static/floors/floor_07_crystal_caverns.png) | ![Floor 08 Storm Bastion](static/floors/floor_08_storm_bastion.png) |
+
+| Floor 9 | Floor 10 |
+|---|---|
+| ![Floor 09 Inferno Ascent](static/floors/floor_09_inferno_ascent.png) | ![Floor 10 Abyss Throne](static/floors/floor_10_abyss_throne.png) |
+
 Each floor uses a different biome and tactical pressure:
 
 - `Verdant Entry`: jungle opener with healing and early core buffs
@@ -41,13 +67,13 @@ Each floor uses a different biome and tactical pressure:
 
 ## Power-ups and progression
 
-Chests grant permanent team-wide buffs for the rest of the run:
+Chests now hold multiple first-come rewards. The agent that opens a reward receives that power-up and its immediate reward, which creates an actual team-allocation problem: one agent can become a carry, or rewards can be spread across the squad for survivability.
 
 - `Damage`: higher attack damage
 - `Range`: longer attack reach
 - `Speed`: extra movement per step
 - `Diagonal`: unlocks diagonal movement
-- `Vitality`: raises effective max health and heals the team
+- `Vitality`: raises effective max health and heals the receiving agent
 
 This makes route planning trainable. A policy can skip a chest, fail later, and eventually learn that the earlier detour was necessary for a later boss or floor.
 
@@ -56,9 +82,10 @@ This makes route planning trainable. A policy can skip a chest, fail later, and 
 The reward signal is now shaped around campaign progress instead of passive survival:
 
 - small per-step cost to avoid wasting turns
-- reward for opening chests
+- reward for claiming chest power-ups
+- small penalty for standing on hazard tiles
 - reward for damage dealt
-- reward for clearing gates and floors
+- stronger rewards for reaching gates and clearing floors
 - large reward for defeating minibosses and the final boss
 - victory reward for finishing the full dungeon
 - penalties for death and full team wipes
@@ -103,9 +130,15 @@ native/
     bindings.cpp
 scripts/
   evaluate_checkpoint.py
+  export_floor_maps.py
   plot_metrics.py
   replay_best.py
   train.py
+static/
+  floors/
+    all_floors_contact_sheet.png
+    floor_01_verdant_entry.png
+    ...
 artifacts/
   checkpoints/
   plots/
@@ -134,19 +167,19 @@ python -m pip install -e .
 Run a fresh training session:
 
 ```powershell
-python scripts/train.py --generations 50 --scratch
+python scripts/train.py --generations 50 --name quick_v3_test
 ```
 
 Run multiple dungeon instances per generation so PPO and evolution score the same team across more than one rollout:
 
 ```powershell
-python scripts/train.py --generations 50 --instances 32 --scratch
+python scripts/train.py --generations 50 --instances 32 --name 32v3_seed7
 ```
 
 Resume from the latest checkpoint:
 
 ```powershell
-python scripts/train.py --generations 200
+python scripts/train.py --generations 200 --name 32v3_seed7
 ```
 
 Render the run live:
@@ -163,12 +196,22 @@ python scripts/train.py --generations 20 --instances 32 --render --render-instan
 
 Checkpointing happens every `10` generations by default, so `Ctrl+C` still leaves you with restartable progress.
 
+Training history is protected. If an existing run has `metrics.csv`, `--scratch` refuses to overwrite it. Use a new `--name` for new experiments.
+
 Safety caps are built in:
 
-- at most `100` simulated instances per run
+- at most `128` simulated instances per run
 - at most `100` rendered instances per run
 - the default training setup now uses `32` simulated instances with `16` worker threads
 - if `--render-instances` is omitted, the renderer defaults to `20` so the window stays readable while all requested instances still simulate
+
+Recommended v3 runs:
+
+```powershell
+python scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v3_seed7 --checkpoint-interval 5
+
+python scripts/train.py --generations 10000 --instances 32 --seed 42 --name 32v3_seed42 --checkpoint-interval 5
+```
 
 ## Parallel execution notes
 
@@ -195,6 +238,12 @@ Rebuild training plots from the CSV log:
 
 ```powershell
 python scripts/plot_metrics.py
+```
+
+Export the floor images used in this README:
+
+```powershell
+python scripts/export_floor_maps.py --out static/floors
 ```
 
 ## Metrics written to artifacts

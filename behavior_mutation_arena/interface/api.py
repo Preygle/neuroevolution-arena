@@ -57,6 +57,11 @@ class ArenaSimulation:
         self.replay_dir = self.artifact_dir / "replays"
         self.metrics_path = self.artifact_dir / "metrics.csv"
         self.progress_checkpoint_path = self.checkpoint_dir / "training_state.pt"
+        if scratch and self.metrics_path.exists():
+            raise SystemExit(
+                f"--scratch would overwrite existing training metrics at {self.metrics_path}. "
+                "Choose a new --name to preserve history."
+            )
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.plot_dir.mkdir(parents=True, exist_ok=True)
         self.replay_dir.mkdir(parents=True, exist_ok=True)
@@ -443,6 +448,13 @@ class ArenaSimulation:
             checkpoint["torch_cuda_rng_state"] = torch.cuda.get_rng_state_all()
         torch.save(checkpoint, self.progress_checkpoint_path)
 
+    def _reject_incompatible_checkpoint(self, reason: str) -> None:
+        raise SystemExit(
+            f"existing training history at {self.artifact_dir} is incompatible with the current environment "
+            f"({reason}). Choose a new --name for v3 training; use --scratch only if you intentionally want "
+            "to replace that run."
+        )
+
     def _load_progress_checkpoint(self) -> None:
         if not self.progress_checkpoint_path.exists():
             return
@@ -454,18 +466,27 @@ class ArenaSimulation:
         checkpoint_config = checkpoint.get("config", {})
 
         if population_states is None or optimizer_states is None:
-            return
+            self._reject_incompatible_checkpoint("checkpoint is missing policy or optimizer state")
         if checkpoint_config.get("environment_name") != self.config.environment_name:
-            return
+            self._reject_incompatible_checkpoint(
+                f"checkpoint environment={checkpoint_config.get('environment_name')} "
+                f"current environment={self.config.environment_name}"
+            )
         checkpoint_population = int(checkpoint_config.get("population_size", -1))
         checkpoint_observation_dim = int(checkpoint_config.get("observation_dim", self.config.observation_dim))
         checkpoint_action_size = int(checkpoint_config.get("action_size", self.config.action_size))
         if checkpoint_population != self.config.population_size:
-            return
+            self._reject_incompatible_checkpoint(
+                f"population_size checkpoint={checkpoint_population} current={self.config.population_size}"
+            )
         if checkpoint_observation_dim != self.config.observation_dim:
-            return
+            self._reject_incompatible_checkpoint(
+                f"observation_dim checkpoint={checkpoint_observation_dim} current={self.config.observation_dim}"
+            )
         if checkpoint_action_size != self.config.action_size:
-            return
+            self._reject_incompatible_checkpoint(
+                f"action_size checkpoint={checkpoint_action_size} current={self.config.action_size}"
+            )
 
         self.policy_bank.load_population(population_states)
         self.policy_bank.load_optimizer_states(optimizer_states)

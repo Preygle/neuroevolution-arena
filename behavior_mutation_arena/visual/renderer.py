@@ -174,6 +174,7 @@ class ArenaRenderer:
         gate_position = tuple(int(value) for value in snapshot["gate_position"])
         gate_open = bool(snapshot["gate_open"])
         effective_max_health = float(snapshot["effective_max_health"])
+        effective_max_health_by_agent = snapshot.get("effective_max_health_by_agent")
         draw_grid_lines = cell_size >= 8
 
         for x in range(self.config.grid_size):
@@ -237,7 +238,10 @@ class ArenaRenderer:
             if cell_size >= 10:
                 label = self.tiny_font.render(str(agent_id), True, (14, 18, 24))
                 self.screen.blit(label, label.get_rect(center=center))
-            health_ratio = max(0.0, min(1.0, float(health[agent_id]) / effective_max_health))
+            max_health = effective_max_health
+            if effective_max_health_by_agent is not None:
+                max_health = float(effective_max_health_by_agent[agent_id])
+            health_ratio = max(0.0, min(1.0, float(health[agent_id]) / max_health))
             energy_ratio = max(0.0, min(1.0, float(energy[agent_id]) / self.config.max_energy))
             bar_x = origin_x + y * cell_size + 1
             width = max(1, cell_size - 2)

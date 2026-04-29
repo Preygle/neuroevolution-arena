@@ -12,7 +12,7 @@ from behavior_mutation_arena.config import (
     POWERUP_STATS,
     PowerUpType,
 )
-from behavior_mutation_arena.core.dungeon_floors import ChestSpawn, DungeonFloor, EnemySpawn, build_dungeon_floors
+from behavior_mutation_arena.core.dungeon_floors import build_dungeon_floors
 from behavior_mutation_arena.core.models import AgentMetrics, StepBatch
 
 
@@ -55,19 +55,20 @@ class ArenaEnvironment:
         self.survival_steps = np.zeros(self.population_size, dtype=np.int16)
         self.current_step = 0
         self.episode_step_limit = config.episode_steps_min
-        self.attack_bonus = 0.0
-        self.range_bonus = 0.0
-        self.speed_bonus = 0
-        self.vitality_bonus = 0.0
-        self.diagonal_unlocked = False
+        self.attack_bonus = np.zeros(self.population_size, dtype=np.float32)
+        self.range_bonus = np.zeros(self.population_size, dtype=np.float32)
+        self.speed_bonus = np.zeros(self.population_size, dtype=np.int16)
+        self.vitality_bonus = np.zeros(self.population_size, dtype=np.float32)
+        self.diagonal_unlocked = np.zeros(self.population_size, dtype=bool)
         self.floors_cleared = 0
         self.max_floor_reached = 1
         self.bosses_defeated = 0
         self.chests_opened = 0
+        self.opened_chest_positions: set[tuple[int, tuple[int, int]]] = set()
         self.powerup_pickups = np.zeros(len(PowerUpType), dtype=np.int16)
         self.victory = False
         self.gate_open = True
-        self.chest_lookup: dict[tuple[int, int], PowerUpType] = {}
+        self.chest_lookup: dict[tuple[int, int], list[PowerUpType]] = {}
         self.enemy_states: list[EnemyState] = []
         self.team_wiped = False
         self.stalled_out = False
@@ -101,15 +102,16 @@ class ArenaEnvironment:
         self.damage_dealt.fill(0.0)
         self.total_reward.fill(0.0)
         self.survival_steps.fill(0)
-        self.attack_bonus = 0.0
-        self.range_bonus = 0.0
-        self.speed_bonus = 0
-        self.vitality_bonus = 0.0
-        self.diagonal_unlocked = False
+        self.attack_bonus.fill(0.0)
+        self.range_bonus.fill(0.0)
+        self.speed_bonus.fill(0)
+        self.vitality_bonus.fill(0.0)
+        self.diagonal_unlocked.fill(False)
         self.floors_cleared = 0
         self.max_floor_reached = 1
         self.bosses_defeated = 0
         self.chests_opened = 0
+        self.opened_chest_positions.clear()
         self.powerup_pickups.fill(0)
         self.victory = False
         self.team_wiped = False
@@ -132,6 +134,7 @@ class ArenaEnvironment:
         truncated = np.zeros(self.population_size, dtype=bool)
         previous_damage = float(self.damage_dealt.sum())
         previous_chests = self.chests_opened
+        previous_powerups = int(self.powerup_pickups.sum())
         previous_bosses = self.bosses_defeated
         previous_floors_cleared = self.floors_cleared
         previous_victory = self.victory
@@ -157,6 +160,7 @@ class ArenaEnvironment:
             rewards,
             previous_damage=previous_damage,
             previous_chests=previous_chests,
+            previous_powerups=previous_powerups,
             previous_bosses=previous_bosses,
             previous_floors_cleared=previous_floors_cleared,
             previous_victory=previous_victory,
@@ -219,8 +223,9 @@ class ArenaEnvironment:
 
     def snapshot(self) -> dict[str, object]:
         chest_grid = np.zeros((self.grid_size, self.grid_size), dtype=np.int8)
-        for (x, y), powerup in self.chest_lookup.items():
-            chest_grid[x, y] = int(powerup) + 1
+        for (x, y), powerups in self.chest_lookup.items():
+            if powerups:
+                chest_grid[x, y] = int(powerups[0]) + 1
         enemy_positions = np.asarray([enemy.position for enemy in self.enemy_states if enemy.alive], dtype=np.int16)
         enemy_kind = np.asarray([int(enemy.kind) for enemy in self.enemy_states if enemy.alive], dtype=np.int8)
         enemy_health = np.asarray([enemy.health for enemy in self.enemy_states if enemy.alive], dtype=np.float32)
@@ -245,11 +250,12 @@ class ArenaEnvironment:
             "health": self.health.copy(),
             "energy": self.energy.copy(),
             "reward": self.total_reward.copy(),
-            "effective_max_health": self._effective_max_health(),
-            "attack_bonus": self.attack_bonus,
-            "range_bonus": self.range_bonus,
-            "speed_bonus": self.speed_bonus,
-            "diagonal_unlocked": self.diagonal_unlocked,
+            "effective_max_health": float(np.max(self._effective_max_health())),
+            "effective_max_health_by_agent": self._effective_max_health().copy(),
+            "attack_bonus": self.attack_bonus.copy(),
+            "range_bonus": self.range_bonus.copy(),
+            "speed_bonus": self.speed_bonus.copy(),
+            "diagonal_unlocked": self.diagonal_unlocked.copy(),
             "bosses_defeated": self.bosses_defeated,
             "chests_opened": self.chests_opened,
             "powerups_picked": int(self.powerup_pickups.sum()),
@@ -326,15 +332,15 @@ class ArenaEnvironment:
                 self.invalid_use_gate_attempts += 1
         if self.config.auto_use_gate and self.gate_open:
             for agent_id in np.flatnonzero(self.alive):
-                if tuple(int(value) for value in self.positions[agent_id]) == self.current_floor.gate_position:
+                if self._agent_can_use_gate(int(agent_id)):
                     return self._use_gate(int(agent_id), rewards)
         return False
 
     def _move_agent(self, agent_id: int, action: Action) -> None:
         dx, dy = MOVE_DELTAS[action]
-        if dx != 0 and dy != 0 and not self.diagonal_unlocked:
+        if dx != 0 and dy != 0 and not self.diagonal_unlocked[agent_id]:
             return
-        steps = 1 + self.speed_bonus
+        steps = 1 + int(self.speed_bonus[agent_id])
         for step_index in range(steps):
             cost = self.config.diagonal_energy_cost if dx != 0 and dy != 0 else self.config.step_energy_cost
             nx = int(self.positions[agent_id, 0] + dx)
@@ -355,7 +361,7 @@ class ArenaEnvironment:
             return
         enemy = self.enemy_states[target_index]
         stats = ENEMY_STATS[enemy.kind]
-        raw_damage = self.config.attack_base_damage + self.attack_bonus - stats.armor
+        raw_damage = self.config.attack_base_damage + float(self.attack_bonus[agent_id]) - stats.armor
         damage = max(1.0, raw_damage)
         enemy.health -= damage
         self.damage_dealt[agent_id] += damage
@@ -372,24 +378,31 @@ class ArenaEnvironment:
 
     def _open_chest(self, agent_id: int, rewards: np.ndarray) -> None:
         position = tuple(int(value) for value in self.positions[agent_id])
-        powerup = self.chest_lookup.pop(position, None)
-        if powerup is None:
+        powerups = self.chest_lookup.get(position)
+        if not powerups:
             return
+        powerup = powerups.pop(0)
+        if not powerups:
+            self.chest_lookup.pop(position, None)
         stats = POWERUP_STATS[powerup]
-        self.attack_bonus += stats.attack_bonus
-        self.range_bonus += stats.range_bonus
-        self.speed_bonus += stats.speed_bonus
-        self.diagonal_unlocked = self.diagonal_unlocked or stats.diagonal_unlocked
+        self.attack_bonus[agent_id] += stats.attack_bonus
+        self.range_bonus[agent_id] += stats.range_bonus
+        self.speed_bonus[agent_id] += stats.speed_bonus
+        self.diagonal_unlocked[agent_id] = self.diagonal_unlocked[agent_id] or stats.diagonal_unlocked
         if stats.vitality_bonus > 0.0:
-            self.vitality_bonus += stats.vitality_bonus
-            self.health[self.alive] = np.minimum(self._effective_max_health(), self.health[self.alive] + stats.vitality_bonus)
-        self.chests_opened += 1
+            self.vitality_bonus[agent_id] += stats.vitality_bonus
+            self.health[agent_id] = min(self._effective_max_health(agent_id), self.health[agent_id] + stats.vitality_bonus)
+        chest_key = (self.current_floor_index, position)
+        if chest_key not in self.opened_chest_positions:
+            self.opened_chest_positions.add(chest_key)
+            self.chests_opened += 1
         self.powerup_pickups[int(powerup)] += 1
-        self._add_team_reward(rewards, self.config.chest_reward + stats.reward)
+        reward = self.config.chest_reward + stats.reward
+        rewards[agent_id] += reward
+        self.total_reward[agent_id] += reward
 
     def _use_gate(self, agent_id: int, rewards: np.ndarray) -> bool:
-        position = tuple(int(value) for value in self.positions[agent_id])
-        if position != self.current_floor.gate_position or not self.gate_open:
+        if not self._agent_can_use_gate(agent_id):
             return False
         self.gate_tile_visits += 1
         if self.current_floor_index == self.config.num_floors - 1:
@@ -415,8 +428,13 @@ class ArenaEnvironment:
             x, y = self.positions[agent_id]
             if self.current_floor.hazard_tiles[x, y]:
                 self.health[agent_id] -= self.config.hazard_damage
+                rewards[agent_id] += self.config.hazard_reward_penalty
+                self.total_reward[agent_id] += self.config.hazard_reward_penalty
             if self.current_floor.heal_tiles[x, y]:
-                self.health[agent_id] = min(self._effective_max_health(), self.health[agent_id] + self.config.heal_tile_amount)
+                self.health[agent_id] = min(
+                    self._effective_max_health(agent_id),
+                    self.health[agent_id] + self.config.heal_tile_amount,
+                )
 
     def _resolve_enemy_turn(self, rewards: np.ndarray) -> None:
         for enemy in self.enemy_states:
@@ -445,7 +463,7 @@ class ArenaEnvironment:
         self.current_floor = self.floors[floor_index]
         self.current_floor_index = floor_index
         self.gate_open = not self.current_floor.gate_locked_until_boss
-        self.chest_lookup = {chest.position: chest.powerup for chest in self.current_floor.chests}
+        self.chest_lookup = {chest.position: list(chest.powerups) for chest in self.current_floor.chests}
         self.enemy_states = [
             EnemyState(kind=spawn.kind, position=spawn.position, health=ENEMY_STATS[spawn.kind].health)
             for spawn in self.current_floor.enemies
@@ -454,7 +472,7 @@ class ArenaEnvironment:
             self.positions[agent_id] = position
             if preserve_team_state and self.alive[agent_id]:
                 self.health[agent_id] = min(
-                    self._effective_max_health(),
+                    self._effective_max_health(agent_id),
                     self.health[agent_id] + self.config.floor_transition_heal,
                 )
                 self.energy[agent_id] = min(self.config.max_energy, self.energy[agent_id] + 20.0)
@@ -467,6 +485,7 @@ class ArenaEnvironment:
         rewards: np.ndarray,
         previous_damage: float,
         previous_chests: int,
+        previous_powerups: int,
         previous_bosses: int,
         previous_floors_cleared: int,
         previous_victory: bool,
@@ -476,6 +495,8 @@ class ArenaEnvironment:
         if float(self.damage_dealt.sum()) > previous_damage + 1e-6:
             progress_made = True
         if self.chests_opened > previous_chests:
+            progress_made = True
+        if int(self.powerup_pickups.sum()) > previous_powerups:
             progress_made = True
         if self.bosses_defeated > previous_bosses:
             progress_made = True
@@ -554,7 +575,7 @@ class ArenaEnvironment:
 
     def _nearest_enemy_in_range(self, agent_id: int) -> int | None:
         origin = tuple(int(value) for value in self.positions[agent_id])
-        attack_range = int(1 + self.range_bonus)
+        attack_range = int(1 + self.range_bonus[agent_id])
         candidates: list[tuple[float, float, int]] = []
         for enemy_index, enemy in enumerate(self.enemy_states):
             if not enemy.alive:
@@ -590,17 +611,17 @@ class ArenaEnvironment:
             observation,
             cursor,
         )
-        max_health = self._effective_max_health()
+        max_health = self._effective_max_health(agent_id)
         observation[cursor] = self.health[agent_id] / max_health if max_health > 0 else 0.0
         observation[cursor + 1] = self.energy[agent_id] / self.config.max_energy
         observation[cursor + 2] = (self.current_floor_index + 1) / self.config.num_floors
         observation[cursor + 3] = self.floors_cleared / self.config.num_floors
         observation[cursor + 4] = float(self.alive.sum()) / self.population_size
-        observation[cursor + 5] = min(1.0, self.attack_bonus / 12.0)
-        observation[cursor + 6] = min(1.0, self.range_bonus / 4.0)
-        observation[cursor + 7] = min(1.0, self.speed_bonus / 4.0)
-        observation[cursor + 8] = float(self.diagonal_unlocked)
-        observation[cursor + 9] = self.chests_opened / 12.0
+        observation[cursor + 5] = min(1.0, float(self.attack_bonus[agent_id]) / 12.0)
+        observation[cursor + 6] = min(1.0, float(self.range_bonus[agent_id]) / 4.0)
+        observation[cursor + 7] = min(1.0, float(self.speed_bonus[agent_id]) / 4.0)
+        observation[cursor + 8] = float(self.diagonal_unlocked[agent_id])
+        observation[cursor + 9] = self.chests_opened / max(1.0, float(self.config.num_floors * 2))
         observation[cursor + 10] = self.bosses_defeated / 2.0
         observation[cursor + 11] = float(self.gate_open)
         gate_dx, gate_dy, gate_distance = self._objective_vector(agent_id, [self.current_floor.gate_position])
@@ -687,14 +708,19 @@ class ArenaEnvironment:
     def _can_enemy_enter(self, x: int, y: int) -> bool:
         if not self._in_bounds(x, y) or self.current_floor.terrain[x, y]:
             return False
+        if (x, y) == self.current_floor.gate_position:
+            return False
         if any(self.alive[idx] and tuple(self.positions[idx]) == (x, y) for idx in range(self.population_size)):
             return False
         if any(enemy.alive and enemy.position == (x, y) for enemy in self.enemy_states):
             return False
         return True
 
-    def _effective_max_health(self) -> float:
-        return self.config.max_health + self.vitality_bonus
+    def _effective_max_health(self, agent_id: int | None = None) -> float | np.ndarray:
+        values = self.config.max_health + self.vitality_bonus
+        if agent_id is None:
+            return values
+        return float(values[agent_id])
 
     def _closest_distance(self, targets: list[tuple[int, int]]) -> int | None:
         if not targets:
@@ -740,12 +766,13 @@ class ArenaEnvironment:
         return dx, dy, distance
 
     def _count_gate_occupants(self) -> int:
-        return sum(
-            1
-            for agent_id in range(self.population_size)
-            if self.alive[agent_id]
-            and tuple(int(value) for value in self.positions[agent_id]) == self.current_floor.gate_position
-        )
+        return sum(1 for agent_id in range(self.population_size) if self._agent_can_use_gate(agent_id))
+
+    def _agent_can_use_gate(self, agent_id: int) -> bool:
+        if not self.alive[agent_id] or not self.gate_open:
+            return False
+        position = tuple(int(value) for value in self.positions[agent_id])
+        return self._manhattan_distance(position, self.current_floor.gate_position) <= self.config.gate_interaction_radius
 
     def _distance(self, origin: tuple[int, int], target: tuple[int, int]) -> int:
         return max(abs(origin[0] - target[0]), abs(origin[1] - target[1]))
