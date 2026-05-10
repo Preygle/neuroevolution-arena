@@ -17,6 +17,7 @@ from behavior_mutation_arena.evolution.engine import EvolutionEngine
 from behavior_mutation_arena.interface.backend import build_backend
 from behavior_mutation_arena.rl.buffer import RolloutBatch, RolloutBuffer
 from behavior_mutation_arena.rl.ppo import PPOPolicyBank
+from behavior_mutation_arena.telemetry import DiscordNotifier
 from behavior_mutation_arena.visual.plots import plot_training_metrics
 
 if TYPE_CHECKING:
@@ -33,6 +34,15 @@ class ArenaSimulation:
         artifact_dir: str | Path = "artifacts",
         checkpoint_interval: int = 10,
         scratch: bool = False,
+        discord_webhook_url: str | None = None,
+        discord_interval: int = 0,
+        discord_video_interval: int = 0,
+        discord_video_checkpoint_interval: int = 0,
+        discord_video_fps: int = 12,
+        discord_video_max_frames: int = 360,
+        discord_video_cell_size: int = 10,
+        discord_video_keep: str = "latest",
+        discord_max_upload_mb: float = 24.0,
     ) -> None:
         self.config = config
         self.seed = config.seed if seed is None else seed
@@ -57,6 +67,7 @@ class ArenaSimulation:
         self.replay_dir = self.artifact_dir / "replays"
         self.metrics_path = self.artifact_dir / "metrics.csv"
         self.progress_checkpoint_path = self.checkpoint_dir / "training_state.pt"
+        self.run_name = self.artifact_dir.name if self.artifact_dir.name else "artifacts"
         if scratch and self.metrics_path.exists():
             raise SystemExit(
                 f"--scratch would overwrite existing training metrics at {self.metrics_path}. "
@@ -80,6 +91,17 @@ class ArenaSimulation:
         self.history: list[GenerationSummary] = []
         self.best_fitness = float("-inf")
         self.start_generation = 0
+        self.discord = DiscordNotifier(
+            webhook_url=discord_webhook_url,
+            metric_interval=discord_interval,
+            video_interval=discord_video_interval,
+            video_checkpoint_interval=discord_video_checkpoint_interval,
+            video_fps=discord_video_fps,
+            video_max_frames=discord_video_max_frames,
+            video_cell_size=discord_video_cell_size,
+            video_keep=discord_video_keep,
+            max_upload_mb=discord_max_upload_mb,
+        )
         if not scratch:
             self._load_progress_checkpoint()
 
@@ -181,6 +203,21 @@ class ArenaSimulation:
                     [metric.invalid_use_gate_attempts for metric in metrics],
                     dtype=np.float32,
                 )
+                boss_damage = np.asarray([metric.boss_damage_dealt for metric in metrics], dtype=np.float32)
+                boss_hits = np.asarray([metric.boss_hits for metric in metrics], dtype=np.float32)
+                boss_health_remaining = np.asarray(
+                    [metric.boss_health_remaining for metric in metrics],
+                    dtype=np.float32,
+                )
+                floor5_entry_alive = np.asarray([metric.floor5_entry_alive for metric in metrics], dtype=np.float32)
+                floor5_entry_power_score = np.asarray(
+                    [metric.floor5_entry_power_score for metric in metrics],
+                    dtype=np.float32,
+                )
+                alive_attack_bonus = np.asarray([metric.alive_attack_bonus for metric in metrics], dtype=np.float32)
+                alive_range_bonus = np.asarray([metric.alive_range_bonus for metric in metrics], dtype=np.float32)
+                powered_agent_deaths = np.asarray([metric.powered_agent_deaths for metric in metrics], dtype=np.float32)
+                miniboss_defeated = np.asarray([metric.miniboss_defeated for metric in metrics], dtype=np.float32)
                 victories = np.asarray([metric.victory for metric in metrics], dtype=np.float32)
                 champion_id = int(np.argmax(fitness))
 
@@ -213,6 +250,15 @@ class ArenaSimulation:
                     mean_gate_tile_visits=float(gate_tile_visits.mean()),
                     mean_use_gate_attempts=float(use_gate_attempts.mean()),
                     mean_invalid_use_gate_attempts=float(invalid_use_gate_attempts.mean()),
+                    mean_boss_damage=float(boss_damage.mean()),
+                    mean_boss_hits=float(boss_hits.mean()),
+                    mean_boss_health_remaining=float(boss_health_remaining.mean()),
+                    mean_floor5_entry_alive=float(floor5_entry_alive.mean()),
+                    mean_floor5_entry_power_score=float(floor5_entry_power_score.mean()),
+                    mean_alive_attack_bonus=float(alive_attack_bonus.mean()),
+                    mean_alive_range_bonus=float(alive_range_bonus.mean()),
+                    mean_powered_agent_deaths=float(powered_agent_deaths.mean()),
+                    mean_miniboss_defeated=float(miniboss_defeated.mean()),
                     success_rate=float(victories.mean()),
                     champion_id=champion_id,
                     elite_ids=elite_ids,
@@ -220,10 +266,13 @@ class ArenaSimulation:
                 self.history.append(summary)
                 _gen_elapsed = time.perf_counter() - _gen_start
                 self._print_generation_progress(summary, generations, _gen_elapsed)
+                self.discord.maybe_send_generation(summary, generations, self.run_name)
+                self._send_generation_replay_if_due(generation + 1, generations)
 
                 completed_generations = generation + 1
                 if completed_generations % self.checkpoint_interval == 0:
                     self._save_progress_checkpoint(completed_generations)
+                    self._send_checkpoint_replay_if_due(completed_generations, generations)
         except KeyboardInterrupt:
             self._save_progress_checkpoint(completed_generations)
             self._write_metrics()
@@ -232,6 +281,7 @@ class ArenaSimulation:
             raise
 
         self._save_progress_checkpoint(generations)
+        self._send_checkpoint_replay_if_due(generations, generations)
         self._write_metrics()
         plot_training_metrics(self.history, self.plot_dir / "training_metrics.png")
         self._shutdown()
@@ -247,6 +297,7 @@ class ArenaSimulation:
             f"Alive {step_batch.info['alive_count']}",
             f"Gate {step_batch.info['closest_gate_distance']} | Best {step_batch.info['best_gate_distance']}",
             f"Chest {step_batch.info['chests_opened']} | Pwr {step_batch.info['powerups_picked']}",
+            f"BossD {step_batch.info['boss_damage']:.1f} | Hits {step_batch.info['boss_hits']}",
             f"GUse {step_batch.info['use_gate_attempts']} | Bad {step_batch.info['invalid_use_gate_attempts']}",
             f"Idle {step_batch.info['steps_since_progress']}",
         ]
@@ -342,6 +393,17 @@ class ArenaSimulation:
                     invalid_use_gate_attempts=float(
                         np.mean([metric.invalid_use_gate_attempts for metric in agent_metrics])
                     ),
+                    boss_damage_dealt=float(np.mean([metric.boss_damage_dealt for metric in agent_metrics])),
+                    boss_hits=float(np.mean([metric.boss_hits for metric in agent_metrics])),
+                    boss_health_remaining=float(np.mean([metric.boss_health_remaining for metric in agent_metrics])),
+                    floor5_entry_alive=float(np.mean([metric.floor5_entry_alive for metric in agent_metrics])),
+                    floor5_entry_power_score=float(
+                        np.mean([metric.floor5_entry_power_score for metric in agent_metrics])
+                    ),
+                    alive_attack_bonus=float(np.mean([metric.alive_attack_bonus for metric in agent_metrics])),
+                    alive_range_bonus=float(np.mean([metric.alive_range_bonus for metric in agent_metrics])),
+                    powered_agent_deaths=float(np.mean([metric.powered_agent_deaths for metric in agent_metrics])),
+                    miniboss_defeated=float(np.mean([metric.miniboss_defeated for metric in agent_metrics])),
                 )
             )
         return aggregated
@@ -396,6 +458,15 @@ class ArenaSimulation:
                     "mean_gate_tile_visits",
                     "mean_use_gate_attempts",
                     "mean_invalid_use_gate_attempts",
+                    "mean_boss_damage",
+                    "mean_boss_hits",
+                    "mean_boss_health_remaining",
+                    "mean_floor5_entry_alive",
+                    "mean_floor5_entry_power_score",
+                    "mean_alive_attack_bonus",
+                    "mean_alive_range_bonus",
+                    "mean_powered_agent_deaths",
+                    "mean_miniboss_defeated",
                     "success_rate",
                     "champion_id",
                     "elite_ids",
@@ -424,6 +495,15 @@ class ArenaSimulation:
                         row.mean_gate_tile_visits,
                         row.mean_use_gate_attempts,
                         row.mean_invalid_use_gate_attempts,
+                        row.mean_boss_damage,
+                        row.mean_boss_hits,
+                        row.mean_boss_health_remaining,
+                        row.mean_floor5_entry_alive,
+                        row.mean_floor5_entry_power_score,
+                        row.mean_alive_attack_bonus,
+                        row.mean_alive_range_bonus,
+                        row.mean_powered_agent_deaths,
+                        row.mean_miniboss_defeated,
                         row.success_rate,
                         row.champion_id,
                         " ".join(str(elite_id) for elite_id in row.elite_ids),
@@ -448,10 +528,31 @@ class ArenaSimulation:
             checkpoint["torch_cuda_rng_state"] = torch.cuda.get_rng_state_all()
         torch.save(checkpoint, self.progress_checkpoint_path)
 
+    def _send_checkpoint_replay_if_due(self, completed_generations: int, total_generations: int) -> None:
+        self.discord.maybe_send_checkpoint_replay(
+            completed_generations=completed_generations,
+            total_generations=total_generations,
+            checkpoint_interval=self.checkpoint_interval,
+            replay_path=self.replay_dir / "best_replay.pkl",
+            artifact_dir=self.artifact_dir,
+            config=self.config,
+            run_name=self.run_name,
+        )
+
+    def _send_generation_replay_if_due(self, completed_generations: int, total_generations: int) -> None:
+        self.discord.maybe_send_generation_replay(
+            completed_generations=completed_generations,
+            total_generations=total_generations,
+            replay_path=self.replay_dir / "best_replay.pkl",
+            artifact_dir=self.artifact_dir,
+            config=self.config,
+            run_name=self.run_name,
+        )
+
     def _reject_incompatible_checkpoint(self, reason: str) -> None:
         raise SystemExit(
             f"existing training history at {self.artifact_dir} is incompatible with the current environment "
-            f"({reason}). Choose a new --name for v3 training; use --scratch only if you intentionally want "
+            f"({reason}). Choose a new --name for v4 training; use --scratch only if you intentionally want "
             "to replace that run."
         )
 
@@ -512,6 +613,15 @@ class ArenaSimulation:
                 mean_gate_tile_visits=row.get("mean_gate_tile_visits", 0.0),
                 mean_use_gate_attempts=row.get("mean_use_gate_attempts", 0.0),
                 mean_invalid_use_gate_attempts=row.get("mean_invalid_use_gate_attempts", 0.0),
+                mean_boss_damage=row.get("mean_boss_damage", 0.0),
+                mean_boss_hits=row.get("mean_boss_hits", 0.0),
+                mean_boss_health_remaining=row.get("mean_boss_health_remaining", 0.0),
+                mean_floor5_entry_alive=row.get("mean_floor5_entry_alive", 0.0),
+                mean_floor5_entry_power_score=row.get("mean_floor5_entry_power_score", 0.0),
+                mean_alive_attack_bonus=row.get("mean_alive_attack_bonus", 0.0),
+                mean_alive_range_bonus=row.get("mean_alive_range_bonus", 0.0),
+                mean_powered_agent_deaths=row.get("mean_powered_agent_deaths", 0.0),
+                mean_miniboss_defeated=row.get("mean_miniboss_defeated", 0.0),
                 success_rate=row.get("success_rate", 0.0),
                 champion_id=row["champion_id"],
                 elite_ids=row["elite_ids"],
@@ -606,7 +716,7 @@ class ArenaSimulation:
         print(sep)
         print(
             f"  {'Gen':>9}  {'BestFit':>9}  {'Reward':>8}  {'Floor':>5}  "
-            f"{'Surv':>5}  {'Gate':>5}  {'BestG':>5}  {'GTile':>5}  {'Chest':>5}  {'Pwr':>5}  {'BadG':>5}  {'s/gen':>6}"
+            f"{'BossD':>6}  {'BossH':>5}  {'F5A':>4}  {'F5Pow':>5}  {'Chest':>5}  {'Pwr':>5}  {'BadG':>5}  {'s/gen':>6}"
         )
         print("  " + "-" * 111)
 
@@ -624,10 +734,10 @@ class ArenaSimulation:
             f"{summary.best_fitness:>9.1f}  "
             f"{summary.mean_reward:>8.1f}  "
             f"{summary.mean_floor_reached:>5.2f}  "
-            f"{summary.mean_survival:>5.0f}  "
-            f"{summary.mean_gate_distance:>5.1f}  "
-            f"{summary.mean_best_gate_distance:>5.1f}  "
-            f"{summary.mean_gate_tile_visits:>5.2f}  "
+            f"{summary.mean_boss_damage:>6.1f}  "
+            f"{summary.mean_boss_hits:>5.1f}  "
+            f"{summary.mean_floor5_entry_alive:>4.1f}  "
+            f"{summary.mean_floor5_entry_power_score:>5.1f}  "
             f"{summary.mean_chests_opened:>5.2f}  "
             f"{summary.mean_powerups_picked:>5.2f}  "
             f"{summary.mean_invalid_use_gate_attempts:>5.2f}  "

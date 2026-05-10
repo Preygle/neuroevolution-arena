@@ -238,6 +238,7 @@ def _warden_keep(grid_size: int) -> DungeonFloor:
     _carve_vertical(terrain, 29, 12, 19)
     _carve_room(terrain, 17, 21, 34, 35)
     _paint_zone(slow, 17, 21, 24, 35)
+    _paint_zone(heal, 14, 27, 19, 32)
     return DungeonFloor(
         index=5,
         name="Warden Keep",

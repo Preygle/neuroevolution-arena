@@ -48,7 +48,7 @@ def main() -> None:
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     config = config_from_checkpoint(checkpoint)
     device = torch.device(args.device or config.device)
-    if config.environment_name != "dungeon_crawler_training_v3":
+    if config.environment_name != "dungeon_crawler_training_v4":
         raise SystemExit(
             "checkpoint environment does not match the dungeon crawler branch; "
             "train a new checkpoint or pass a dungeon checkpoint explicitly"
@@ -79,6 +79,12 @@ def main() -> None:
     gate_tile_visits: list[float] = []
     use_gate_attempts: list[float] = []
     invalid_use_gate_attempts: list[float] = []
+    boss_damage: list[float] = []
+    boss_hits: list[float] = []
+    boss_health_remaining: list[float] = []
+    floor5_entry_alive: list[float] = []
+    floor5_entry_power_score: list[float] = []
+    miniboss_defeated: list[float] = []
     victories: list[float] = []
 
     for episode in range(args.episodes):
@@ -105,6 +111,12 @@ def main() -> None:
         gate_tile_visits.append(stats.mean(metric.gate_tile_visits for metric in metrics))
         use_gate_attempts.append(stats.mean(metric.use_gate_attempts for metric in metrics))
         invalid_use_gate_attempts.append(stats.mean(metric.invalid_use_gate_attempts for metric in metrics))
+        boss_damage.append(stats.mean(metric.boss_damage_dealt for metric in metrics))
+        boss_hits.append(stats.mean(metric.boss_hits for metric in metrics))
+        boss_health_remaining.append(stats.mean(metric.boss_health_remaining for metric in metrics))
+        floor5_entry_alive.append(stats.mean(metric.floor5_entry_alive for metric in metrics))
+        floor5_entry_power_score.append(stats.mean(metric.floor5_entry_power_score for metric in metrics))
+        miniboss_defeated.append(stats.mean(metric.miniboss_defeated for metric in metrics))
         victories.append(stats.mean(metric.victory for metric in metrics))
 
     print(f"episodes={args.episodes}")
@@ -126,6 +138,12 @@ def main() -> None:
     print(f"gate_tile_visits={stats.mean(gate_tile_visits):.2f}")
     print(f"use_gate_attempts={stats.mean(use_gate_attempts):.2f}")
     print(f"invalid_use_gate_attempts={stats.mean(invalid_use_gate_attempts):.2f}")
+    print(f"boss_damage={stats.mean(boss_damage):.2f}")
+    print(f"boss_hits={stats.mean(boss_hits):.2f}")
+    print(f"boss_health_remaining={stats.mean(boss_health_remaining):.2f}")
+    print(f"floor5_entry_alive={stats.mean(floor5_entry_alive):.2f}")
+    print(f"floor5_entry_power_score={stats.mean(floor5_entry_power_score):.2f}")
+    print(f"miniboss_defeated={stats.mean(miniboss_defeated):.2f}")
     print(f"victory_rate={stats.mean(victories):.2f}")
 
 

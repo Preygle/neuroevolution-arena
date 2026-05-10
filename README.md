@@ -118,8 +118,11 @@ behavior_mutation_arena/
   interface/
     api.py
     backend.py
+  telemetry/
+    discord.py
   visual/
     plots.py
+    replay_video.py
     renderer.py
 docs/
   architecture.md
@@ -167,19 +170,19 @@ python -m pip install -e .
 Run a fresh training session:
 
 ```powershell
-python scripts/train.py --generations 50 --name quick_v3_test
+python scripts/train.py --generations 50 --name quick_v4_test
 ```
 
 Run multiple dungeon instances per generation so PPO and evolution score the same team across more than one rollout:
 
 ```powershell
-python scripts/train.py --generations 50 --instances 32 --name 32v3_seed7
+python scripts/train.py --generations 50 --instances 32 --name 32v4_seed7
 ```
 
 Resume from the latest checkpoint:
 
 ```powershell
-python scripts/train.py --generations 200 --name 32v3_seed7
+python scripts/train.py --generations 200 --name 32v4_seed7
 ```
 
 Render the run live:
@@ -205,13 +208,40 @@ Safety caps are built in:
 - the default training setup now uses `32` simulated instances with `16` worker threads
 - if `--render-instances` is omitted, the renderer defaults to `20` so the window stays readable while all requested instances still simulate
 
-Recommended v3 runs:
+Recommended v4 runs:
 
 ```powershell
-python scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v3_seed7 --checkpoint-interval 5
+python scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v4_seed7 --checkpoint-interval 5
 
-python scripts/train.py --generations 10000 --instances 32 --seed 42 --name 32v3_seed42 --checkpoint-interval 5
+python scripts/train.py --generations 10000 --instances 32 --seed 42 --name 32v4_seed42 --checkpoint-interval 5
 ```
+
+## Discord telemetry
+
+Training can post metric summaries and periodic best-replay GIFs to a Discord channel through a webhook. Create a webhook in Discord from `Channel Settings -> Integrations -> Webhooks -> New Webhook`, copy the webhook URL, and store it as an environment variable instead of putting it directly in shell history:
+
+```powershell
+$env:DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+```
+
+Example run with metrics every generation and one best replay every `25` generations:
+
+```powershell
+python scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v4_seed7 --checkpoint-interval 5 --discord-interval 1 --discord-video-interval 25
+```
+
+Useful Discord flags:
+
+- `--discord-interval N`: send metric embeds every `N` generations
+- `--discord-video-interval N`: send the current `best_replay.pkl` every `N` generations
+- `--discord-video-checkpoints N`: legacy checkpoint-based cadence, ignored when `--discord-video-interval` is set
+- `--discord-video-max-frames N`: cap GIF length so uploads stay below Discord limits
+- `--discord-video-cell-size N`: lower this if replay GIFs are too large
+- `--discord-video-keep latest`: keep only `artifacts/<name>/discord/latest_best_replay.gif`
+- `--discord-video-keep all`: archive every posted replay GIF locally
+- `--discord-video-keep none`: create a temporary GIF only for upload, then delete it
+
+By default replay GIFs are stored locally as `artifacts/<name>/discord/latest_best_replay.gif`. Keeping the latest file is recommended because it gives you a local copy for debugging failed uploads. Use `none` if disk usage matters more than local replay history. Discord still needs a temporary local file during upload.
 
 ## Parallel execution notes
 
@@ -251,6 +281,7 @@ python scripts/export_floor_maps.py --out static/floors
 - `artifacts/checkpoints/best_policy.pt`
 - `artifacts/checkpoints/training_state.pt`
 - `artifacts/replays/best_replay.pkl`
+- `artifacts/discord/latest_best_replay.gif` when Discord replay uploads are enabled
 - `artifacts/metrics.csv`
 - `artifacts/plots/training_metrics.png`
 

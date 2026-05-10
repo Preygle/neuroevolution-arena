@@ -93,6 +93,9 @@ def load_metrics(csv_path: Path) -> list[dict]:
                     "mean_chests_opened":   float(row["mean_chests_opened"]),
                     "mean_powerups_picked": float(row.get("mean_powerups_picked", row.get("mean_chests_opened", 0.0)) or 0.0),
                     "mean_damage":          float(row.get("mean_damage", 0.0) or 0.0),
+                    "mean_boss_damage":     float(row.get("mean_boss_damage", 0.0) or 0.0),
+                    "mean_boss_hits":       float(row.get("mean_boss_hits", 0.0) or 0.0),
+                    "mean_miniboss_defeated": float(row.get("mean_miniboss_defeated", 0.0) or 0.0),
                     "mean_gate_distance":   float(row.get("mean_gate_distance", 0.0) or 0.0),
                     "mean_best_gate_distance": float(row.get("mean_best_gate_distance", row.get("mean_gate_distance", 0.0)) or 0.0),
                     "mean_gate_tile_visits": float(row.get("mean_gate_tile_visits", 0.0) or 0.0),
@@ -143,6 +146,8 @@ def write_summary_txt(rows: list[dict], dest: Path, source_csv: Path) -> None:
         fh.write(f"    Mean floor     : {last['mean_floor_reached']:.2f}\n")
         fh.write(f"    Mean survival  : {last['mean_survival']:.0f} steps\n")
         fh.write(f"    Mean bosses    : {last['mean_bosses_defeated']:.2f}\n")
+        fh.write(f"    Boss damage    : {last['mean_boss_damage']:.2f}\n")
+        fh.write(f"    Boss hits      : {last['mean_boss_hits']:.2f}\n")
         fh.write(f"    Mean chests    : {last['mean_chests_opened']:.2f}\n")
         fh.write(f"    Mean powerups  : {last['mean_powerups_picked']:.2f}\n")
         fh.write(f"    Best gate dist : {last['mean_best_gate_distance']:.2f}\n")
@@ -199,6 +204,7 @@ def plot_full(rows: list[dict], dest: Path) -> None:
     mean_fitness    = [r["mean_fitness"] for r in rows]
     floor_reached   = [r["mean_floor_reached"] for r in rows]
     bosses          = [r["mean_bosses_defeated"] for r in rows]
+    boss_damage     = [r["mean_boss_damage"] for r in rows]
     chests          = [r["mean_chests_opened"] for r in rows]
     gate_dist       = [r["mean_gate_distance"] for r in rows]
     best_gate_dist  = [r["mean_best_gate_distance"] for r in rows]
@@ -228,6 +234,7 @@ def plot_full(rows: list[dict], dest: Path) -> None:
 
     # Combat
     axes[2].plot(gens, _smooth(bosses), color="#e05c5c", linewidth=2.0, label="bosses")
+    axes[2].plot(gens, _smooth(boss_damage), color="#ff9f5e", linewidth=1.7, label="boss damage")
     axes[2].plot(gens, _smooth(chests), color="#6dc96d", linewidth=1.8, label="chests", alpha=0.85)
     axes[2].set_ylabel("Bosses / Chests")
     axes[2].legend(loc="upper left")

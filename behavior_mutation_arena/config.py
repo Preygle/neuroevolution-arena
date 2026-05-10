@@ -51,6 +51,7 @@ class EnemyStats:
     attack_range: int
     armor: float
     reward: float
+    aggro_range: int
 
 
 POWERUP_STATS = {
@@ -62,16 +63,16 @@ POWERUP_STATS = {
 }
 
 ENEMY_STATS = {
-    EnemyKind.SKIRMISHER: EnemyStats(health=32.0, damage=8.0, attack_range=1, armor=1.0, reward=10.0),
-    EnemyKind.ARCHER: EnemyStats(health=26.0, damage=6.0, attack_range=3, armor=1.0, reward=10.0),
-    EnemyKind.MINI_BOSS: EnemyStats(health=180.0, damage=14.0, attack_range=2, armor=6.0, reward=60.0),
-    EnemyKind.FINAL_BOSS: EnemyStats(health=430.0, damage=18.0, attack_range=3, armor=10.0, reward=180.0),
+    EnemyKind.SKIRMISHER: EnemyStats(health=32.0, damage=8.0, attack_range=1, armor=1.0, reward=10.0, aggro_range=10),
+    EnemyKind.ARCHER: EnemyStats(health=26.0, damage=6.0, attack_range=3, armor=1.0, reward=10.0, aggro_range=12),
+    EnemyKind.MINI_BOSS: EnemyStats(health=170.0, damage=11.0, attack_range=2, armor=4.0, reward=60.0, aggro_range=8),
+    EnemyKind.FINAL_BOSS: EnemyStats(health=430.0, damage=18.0, attack_range=3, armor=10.0, reward=180.0, aggro_range=10),
 }
 
 
 @dataclass
 class ArenaConfig:
-    environment_name: str = "dungeon_crawler_training_v3"
+    environment_name: str = "dungeon_crawler_training_v4"
     grid_size: int = 36
     population_size: int = 5
     num_floors: int = 10
@@ -92,26 +93,31 @@ class ArenaConfig:
     floor_transition_heal: float = 10.0
     attack_base_damage: float = 6.0
     attack_damage_reward_scale: float = 0.75
+    boss_damage_reward_scale: float = 2.5
+    boss_first_hit_reward: float = 25.0
     step_penalty: float = -0.03
     hazard_reward_penalty: float = -0.12
     gate_distance_reward_scale: float = 1.5
     chest_distance_reward_scale: float = 0.2
-    boss_distance_reward_scale: float = 0.65
+    boss_distance_reward_scale: float = 0.35
     chest_reward: float = 6.0
     gate_reward: float = 65.0
     floor_clear_reward: float = 85.0
-    mini_boss_reward: float = 60.0
+    mini_boss_reward: float = 180.0
     final_boss_reward: float = 180.0
     victory_reward: float = 260.0
     death_penalty: float = -12.0
+    powered_agent_death_penalty_scale: float = 3.0
+    powered_agent_transition_reward_scale: float = 1.5
     team_wipe_penalty: float = -80.0
     invalid_gate_action_penalty: float = -1.0
+    locked_gate_action_penalty: float = -4.0
     no_progress_penalty_interval: int = 12
     no_progress_penalty: float = -4.0
     no_progress_patience: int = 28
     no_progress_termination_penalty: float = -16.0
     floor_progress_weight: float = 60.0
-    boss_weight: float = 72.0
+    boss_weight: float = 160.0
     chest_weight: float = 2.0
     victory_weight: float = 220.0
     damage_weight: float = 0.18

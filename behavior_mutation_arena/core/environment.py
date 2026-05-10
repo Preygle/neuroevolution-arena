@@ -51,6 +51,8 @@ class ArenaEnvironment:
         self.health = np.full(self.population_size, config.initial_health, dtype=np.float32)
         self.energy = np.full(self.population_size, config.initial_energy, dtype=np.float32)
         self.damage_dealt = np.zeros(self.population_size, dtype=np.float32)
+        self.boss_damage_dealt = np.zeros(self.population_size, dtype=np.float32)
+        self.boss_hits = np.zeros(self.population_size, dtype=np.int16)
         self.total_reward = np.zeros(self.population_size, dtype=np.float32)
         self.survival_steps = np.zeros(self.population_size, dtype=np.int16)
         self.current_step = 0
@@ -63,6 +65,7 @@ class ArenaEnvironment:
         self.floors_cleared = 0
         self.max_floor_reached = 1
         self.bosses_defeated = 0
+        self.mini_bosses_defeated = 0
         self.chests_opened = 0
         self.opened_chest_positions: set[tuple[int, tuple[int, int]]] = set()
         self.powerup_pickups = np.zeros(len(PowerUpType), dtype=np.int16)
@@ -83,6 +86,12 @@ class ArenaEnvironment:
         self.gate_tile_visits = 0
         self.use_gate_attempts = 0
         self.invalid_use_gate_attempts = 0
+        self.boss_first_hit_awarded = False
+        self.floor5_entry_recorded = False
+        self.floor5_entry_alive = 0
+        self.floor5_entry_power_score = 0.0
+        self.powered_agent_deaths = 0
+        self.locked_gate_attempt_this_step = False
 
     def set_generation(self, generation: int) -> None:
         self.current_generation = generation
@@ -100,6 +109,8 @@ class ArenaEnvironment:
         self.health.fill(self.config.initial_health)
         self.energy.fill(self.config.initial_energy)
         self.damage_dealt.fill(0.0)
+        self.boss_damage_dealt.fill(0.0)
+        self.boss_hits.fill(0)
         self.total_reward.fill(0.0)
         self.survival_steps.fill(0)
         self.attack_bonus.fill(0.0)
@@ -110,6 +121,7 @@ class ArenaEnvironment:
         self.floors_cleared = 0
         self.max_floor_reached = 1
         self.bosses_defeated = 0
+        self.mini_bosses_defeated = 0
         self.chests_opened = 0
         self.opened_chest_positions.clear()
         self.powerup_pickups.fill(0)
@@ -121,6 +133,12 @@ class ArenaEnvironment:
         self.gate_tile_visits = 0
         self.use_gate_attempts = 0
         self.invalid_use_gate_attempts = 0
+        self.boss_first_hit_awarded = False
+        self.floor5_entry_recorded = False
+        self.floor5_entry_alive = 0
+        self.floor5_entry_power_score = 0.0
+        self.powered_agent_deaths = 0
+        self.locked_gate_attempt_this_step = False
         self._load_floor(self.current_floor_index, preserve_team_state=False)
         return self.observe_all()
 
@@ -138,6 +156,7 @@ class ArenaEnvironment:
         previous_bosses = self.bosses_defeated
         previous_floors_cleared = self.floors_cleared
         previous_victory = self.victory
+        self.locked_gate_attempt_this_step = False
 
         self.current_step += 1
         active_mask = self.alive.copy()
@@ -200,6 +219,7 @@ class ArenaEnvironment:
             "floor_index": self.current_floor_index + 1,
             "floor_name": self.current_floor.name,
             "bosses_defeated": self.bosses_defeated,
+            "miniboss_defeated": int(self.mini_bosses_defeated > 0),
             "chests_opened": self.chests_opened,
             "powerups_picked": int(self.powerup_pickups.sum()),
             "damage_powerups": int(self.powerup_pickups[PowerUpType.DAMAGE]),
@@ -218,6 +238,14 @@ class ArenaEnvironment:
             "invalid_use_gate_attempts": self.invalid_use_gate_attempts,
             "steps_since_progress": self.steps_since_progress,
             "stalled_out": self.stalled_out,
+            "boss_damage": float(self.boss_damage_dealt.sum()),
+            "boss_hits": int(self.boss_hits.sum()),
+            "boss_health_remaining": self._boss_health_remaining(),
+            "floor5_entry_alive": self.floor5_entry_alive,
+            "floor5_entry_power_score": self.floor5_entry_power_score,
+            "alive_attack_bonus": self._alive_mean_bonus(self.attack_bonus),
+            "alive_range_bonus": self._alive_mean_bonus(self.range_bonus),
+            "powered_agent_deaths": self.powered_agent_deaths,
         }
         return StepBatch(observations, rewards, terminated, truncated, info)
 
@@ -257,6 +285,7 @@ class ArenaEnvironment:
             "speed_bonus": self.speed_bonus.copy(),
             "diagonal_unlocked": self.diagonal_unlocked.copy(),
             "bosses_defeated": self.bosses_defeated,
+            "miniboss_defeated": int(self.mini_bosses_defeated > 0),
             "chests_opened": self.chests_opened,
             "powerups_picked": int(self.powerup_pickups.sum()),
             "powerup_pickups": self.powerup_pickups.copy(),
@@ -271,6 +300,14 @@ class ArenaEnvironment:
             "invalid_use_gate_attempts": self.invalid_use_gate_attempts,
             "steps_since_progress": self.steps_since_progress,
             "stalled_out": self.stalled_out,
+            "boss_damage": self.boss_damage_dealt.copy(),
+            "boss_hits": self.boss_hits.copy(),
+            "boss_health_remaining": self._boss_health_remaining(),
+            "floor5_entry_alive": self.floor5_entry_alive,
+            "floor5_entry_power_score": self.floor5_entry_power_score,
+            "alive_attack_bonus": self._alive_mean_bonus(self.attack_bonus),
+            "alive_range_bonus": self._alive_mean_bonus(self.range_bonus),
+            "powered_agent_deaths": self.powered_agent_deaths,
         }
 
     def get_agent_metrics(self) -> list[AgentMetrics]:
@@ -308,6 +345,15 @@ class ArenaEnvironment:
                     gate_tile_visits=float(self.gate_tile_visits),
                     use_gate_attempts=float(self.use_gate_attempts),
                     invalid_use_gate_attempts=float(self.invalid_use_gate_attempts),
+                    boss_damage_dealt=float(self.boss_damage_dealt[agent_id]),
+                    boss_hits=float(self.boss_hits[agent_id]),
+                    boss_health_remaining=float(self._boss_health_remaining()),
+                    floor5_entry_alive=float(self.floor5_entry_alive),
+                    floor5_entry_power_score=float(self.floor5_entry_power_score),
+                    alive_attack_bonus=float(self._alive_mean_bonus(self.attack_bonus)),
+                    alive_range_bonus=float(self._alive_mean_bonus(self.range_bonus)),
+                    powered_agent_deaths=float(self.powered_agent_deaths),
+                    miniboss_defeated=float(self.mini_bosses_defeated > 0),
                 )
             )
         return metrics
@@ -327,8 +373,15 @@ class ArenaEnvironment:
                 self.use_gate_attempts += 1
                 if self._use_gate(agent_id, rewards):
                     return True
-                rewards[agent_id] += self.config.invalid_gate_action_penalty
-                self.total_reward[agent_id] += self.config.invalid_gate_action_penalty
+                penalty = (
+                    self.config.locked_gate_action_penalty
+                    if not self.gate_open and self._agent_in_gate_radius(agent_id)
+                    else self.config.invalid_gate_action_penalty
+                )
+                if penalty == self.config.locked_gate_action_penalty:
+                    self.locked_gate_attempt_this_step = True
+                rewards[agent_id] += penalty
+                self.total_reward[agent_id] += penalty
                 self.invalid_use_gate_attempts += 1
         if self.config.auto_use_gate and self.gate_open:
             for agent_id in np.flatnonzero(self.alive):
@@ -362,19 +415,28 @@ class ArenaEnvironment:
         enemy = self.enemy_states[target_index]
         stats = ENEMY_STATS[enemy.kind]
         raw_damage = self.config.attack_base_damage + float(self.attack_bonus[agent_id]) - stats.armor
-        damage = max(1.0, raw_damage)
+        damage = min(max(1.0, raw_damage), max(0.0, enemy.health))
         enemy.health -= damage
         self.damage_dealt[agent_id] += damage
-        self._add_team_reward(rewards, damage * self.config.attack_damage_reward_scale)
+        self._add_agent_reward(agent_id, rewards, damage * self.config.attack_damage_reward_scale)
+        if enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}:
+            self.boss_damage_dealt[agent_id] += damage
+            self.boss_hits[agent_id] += 1
+            self._add_agent_reward(agent_id, rewards, damage * self.config.boss_damage_reward_scale)
+            if not self.boss_first_hit_awarded:
+                self.boss_first_hit_awarded = True
+                self._add_agent_reward(agent_id, rewards, self.config.boss_first_hit_reward)
         if enemy.health <= 0.0 and enemy.alive:
             enemy.alive = False
             if enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}:
                 self.bosses_defeated += 1
+                if enemy.kind is EnemyKind.MINI_BOSS:
+                    self.mini_bosses_defeated += 1
                 self.gate_open = True
                 bonus = self.config.final_boss_reward if enemy.kind is EnemyKind.FINAL_BOSS else self.config.mini_boss_reward
                 self._add_team_reward(rewards, bonus)
             else:
-                self._add_team_reward(rewards, stats.reward)
+                self._add_agent_reward(agent_id, rewards, stats.reward)
 
     def _open_chest(self, agent_id: int, rewards: np.ndarray) -> None:
         position = tuple(int(value) for value in self.positions[agent_id])
@@ -417,6 +479,9 @@ class ArenaEnvironment:
             rewards,
             self.config.gate_reward + self.config.floor_clear_reward * float(self.current_floor_index + 1),
         )
+        alive_power_score = self._alive_power_score()
+        if alive_power_score > 0.0:
+            self._add_team_reward(rewards, alive_power_score * self.config.powered_agent_transition_reward_scale)
         self.current_floor_index += 1
         self._load_floor(self.current_floor_index, preserve_team_state=True)
         return True
@@ -440,11 +505,11 @@ class ArenaEnvironment:
         for enemy in self.enemy_states:
             if not enemy.alive:
                 continue
-            target_id = self._nearest_alive_agent(enemy.position)
-            if target_id is None:
-                return
-            target_position = tuple(int(value) for value in self.positions[target_id])
             stats = ENEMY_STATS[enemy.kind]
+            target_id = self._nearest_alive_agent(enemy.position, max_distance=stats.aggro_range)
+            if target_id is None:
+                continue
+            target_position = tuple(int(value) for value in self.positions[target_id])
             if self._distance(enemy.position, target_position) <= stats.attack_range:
                 self.health[target_id] -= stats.damage
                 continue
@@ -452,17 +517,22 @@ class ArenaEnvironment:
 
     def _handle_agent_deaths(self, death_mask: np.ndarray, rewards: np.ndarray, terminated: np.ndarray) -> None:
         for agent_id in np.flatnonzero(death_mask):
+            power_score = self._agent_power_score(int(agent_id))
             self.alive[agent_id] = False
             self.health[agent_id] = 0.0
             self.energy[agent_id] = 0.0
-            rewards[agent_id] += self.config.death_penalty
-            self.total_reward[agent_id] += self.config.death_penalty
+            penalty = self.config.death_penalty - power_score * self.config.powered_agent_death_penalty_scale
+            rewards[agent_id] += penalty
+            self.total_reward[agent_id] += penalty
+            if power_score > 0.5:
+                self.powered_agent_deaths += 1
             terminated[agent_id] = True
 
     def _load_floor(self, floor_index: int, preserve_team_state: bool) -> None:
         self.current_floor = self.floors[floor_index]
         self.current_floor_index = floor_index
         self.gate_open = not self.current_floor.gate_locked_until_boss
+        self.boss_first_hit_awarded = False
         self.chest_lookup = {chest.position: list(chest.powerups) for chest in self.current_floor.chests}
         self.enemy_states = [
             EnemyState(kind=spawn.kind, position=spawn.position, health=ENEMY_STATS[spawn.kind].health)
@@ -476,6 +546,10 @@ class ArenaEnvironment:
                     self.health[agent_id] + self.config.floor_transition_heal,
                 )
                 self.energy[agent_id] = min(self.config.max_energy, self.energy[agent_id] + 20.0)
+        if floor_index == 4 and preserve_team_state and not self.floor5_entry_recorded:
+            self.floor5_entry_recorded = True
+            self.floor5_entry_alive = int(self.alive.sum())
+            self.floor5_entry_power_score = self._alive_power_score()
         self.steps_since_progress = 0
         self.stalled_out = False
         self._reset_objective_tracking(reset_episode_tracking=not preserve_team_state)
@@ -545,10 +619,10 @@ class ArenaEnvironment:
         else:
             self.best_chest_distance = -1
 
-        if not self.gate_open and boss_distance is not None:
+        if not self.gate_open and boss_distance is not None and not self.locked_gate_attempt_this_step:
             if self.best_boss_distance < 0:
                 self.best_boss_distance = boss_distance
-            elif boss_distance < self.best_boss_distance:
+            elif boss_distance < self.best_boss_distance and boss_distance > self._max_alive_attack_range():
                 delta = self.best_boss_distance - boss_distance
                 self._add_team_reward(rewards, delta * self.config.boss_distance_reward_scale)
                 progress_made = True
@@ -588,13 +662,16 @@ class ArenaEnvironment:
         candidates.sort(key=lambda item: (item[0], item[1]))
         return candidates[0][2]
 
-    def _nearest_alive_agent(self, origin: tuple[int, int]) -> int | None:
+    def _nearest_alive_agent(self, origin: tuple[int, int], max_distance: int | None = None) -> int | None:
         candidates: list[tuple[float, int]] = []
         for agent_id in range(self.population_size):
             if not self.alive[agent_id]:
                 continue
             position = tuple(int(value) for value in self.positions[agent_id])
-            candidates.append((self._distance(origin, position), agent_id))
+            distance = self._distance(origin, position)
+            if max_distance is not None and distance > max_distance:
+                continue
+            candidates.append((distance, agent_id))
         if not candidates:
             return None
         candidates.sort(key=lambda item: item[0])
@@ -769,10 +846,43 @@ class ArenaEnvironment:
         return sum(1 for agent_id in range(self.population_size) if self._agent_can_use_gate(agent_id))
 
     def _agent_can_use_gate(self, agent_id: int) -> bool:
-        if not self.alive[agent_id] or not self.gate_open:
+        return self.gate_open and self._agent_in_gate_radius(agent_id)
+
+    def _agent_in_gate_radius(self, agent_id: int) -> bool:
+        if not self.alive[agent_id]:
             return False
         position = tuple(int(value) for value in self.positions[agent_id])
         return self._manhattan_distance(position, self.current_floor.gate_position) <= self.config.gate_interaction_radius
+
+    def _agent_power_score(self, agent_id: int) -> float:
+        return float(
+            self.attack_bonus[agent_id]
+            + self.range_bonus[agent_id] * 2.0
+            + self.speed_bonus[agent_id] * 2.0
+            + float(self.diagonal_unlocked[agent_id]) * 2.0
+            + self.vitality_bonus[agent_id] / 12.0
+        )
+
+    def _alive_power_score(self) -> float:
+        return float(sum(self._agent_power_score(int(agent_id)) for agent_id in np.flatnonzero(self.alive)))
+
+    def _alive_mean_bonus(self, values: np.ndarray) -> float:
+        if not self.alive.any():
+            return 0.0
+        return float(np.mean(values[self.alive]))
+
+    def _boss_health_remaining(self) -> float:
+        boss_health = [
+            enemy.health
+            for enemy in self.enemy_states
+            if enemy.alive and enemy.kind in {EnemyKind.MINI_BOSS, EnemyKind.FINAL_BOSS}
+        ]
+        return float(sum(boss_health))
+
+    def _max_alive_attack_range(self) -> int:
+        if not self.alive.any():
+            return 1
+        return int(1 + np.max(self.range_bonus[self.alive]))
 
     def _distance(self, origin: tuple[int, int], target: tuple[int, int]) -> int:
         return max(abs(origin[0] - target[0]), abs(origin[1] - target[1]))
@@ -783,6 +893,10 @@ class ArenaEnvironment:
     def _add_team_reward(self, rewards: np.ndarray, value: float) -> None:
         rewards += value
         self.total_reward += value
+
+    def _add_agent_reward(self, agent_id: int, rewards: np.ndarray, value: float) -> None:
+        rewards[agent_id] += value
+        self.total_reward[agent_id] += value
 
     def _in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.grid_size and 0 <= y < self.grid_size

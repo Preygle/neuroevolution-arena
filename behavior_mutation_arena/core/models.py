@@ -28,6 +28,15 @@ class AgentMetrics:
     gate_tile_visits: float = 0.0
     use_gate_attempts: float = 0.0
     invalid_use_gate_attempts: float = 0.0
+    boss_damage_dealt: float = 0.0
+    boss_hits: float = 0.0
+    boss_health_remaining: float = 0.0
+    floor5_entry_alive: float = 0.0
+    floor5_entry_power_score: float = 0.0
+    alive_attack_bonus: float = 0.0
+    alive_range_bonus: float = 0.0
+    powered_agent_deaths: float = 0.0
+    miniboss_defeated: float = 0.0
 
 
 @dataclass
@@ -64,3 +73,12 @@ class GenerationSummary:
     mean_speed_powerups: float = 0.0
     mean_diagonal_powerups: float = 0.0
     mean_vitality_powerups: float = 0.0
+    mean_boss_damage: float = 0.0
+    mean_boss_hits: float = 0.0
+    mean_boss_health_remaining: float = 0.0
+    mean_floor5_entry_alive: float = 0.0
+    mean_floor5_entry_power_score: float = 0.0
+    mean_alive_attack_bonus: float = 0.0
+    mean_alive_range_bonus: float = 0.0
+    mean_powered_agent_deaths: float = 0.0
+    mean_miniboss_defeated: float = 0.0

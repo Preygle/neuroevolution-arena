@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import torch
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from behavior_mutation_arena.config import ArenaConfig
 from behavior_mutation_arena.interface.api import ArenaSimulation
@@ -24,6 +31,45 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--scratch", action="store_true")
     parser.add_argument("--checkpoint-interval", type=int, default=10)
+    parser.add_argument(
+        "--discord-webhook-url",
+        type=str,
+        default=None,
+        help="Discord webhook URL. Prefer DISCORD_WEBHOOK_URL so the secret is not in shell history.",
+    )
+    parser.add_argument(
+        "--discord-interval",
+        type=int,
+        default=0,
+        help="Post metric embeds every N generations. 0 disables Discord metrics.",
+    )
+    parser.add_argument(
+        "--discord-video-checkpoints",
+        type=int,
+        default=0,
+        help="Legacy option: post the current best replay once every N checkpoints. Ignored if --discord-video-interval is set.",
+    )
+    parser.add_argument(
+        "--discord-video-interval",
+        type=int,
+        default=0,
+        help="Post the current best replay every N generations. 0 disables generation-based replay uploads.",
+    )
+    parser.add_argument("--discord-video-fps", type=int, default=12)
+    parser.add_argument("--discord-video-max-frames", type=int, default=360)
+    parser.add_argument("--discord-video-cell-size", type=int, default=10)
+    parser.add_argument(
+        "--discord-video-keep",
+        choices=["none", "latest", "all"],
+        default="latest",
+        help="Local replay GIF retention policy after Discord upload.",
+    )
+    parser.add_argument(
+        "--discord-max-upload-mb",
+        type=float,
+        default=24.0,
+        help="Skip Discord replay upload if the GIF is larger than this size.",
+    )
     parser.add_argument(
         "--artifact-dir",
         type=Path,
@@ -78,6 +124,15 @@ def main() -> None:
         artifact_dir=artifact_dir,
         checkpoint_interval=args.checkpoint_interval,
         scratch=args.scratch,
+        discord_webhook_url=args.discord_webhook_url or os.getenv("DISCORD_WEBHOOK_URL"),
+        discord_interval=args.discord_interval,
+        discord_video_interval=args.discord_video_interval,
+        discord_video_checkpoint_interval=args.discord_video_checkpoints,
+        discord_video_fps=args.discord_video_fps,
+        discord_video_max_frames=args.discord_video_max_frames,
+        discord_video_cell_size=args.discord_video_cell_size,
+        discord_video_keep=args.discord_video_keep,
+        discord_max_upload_mb=args.discord_max_upload_mb,
     )
     history = simulation.train(args.generations)
     if not history:
