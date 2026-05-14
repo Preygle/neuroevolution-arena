@@ -127,16 +127,19 @@ class PPOPolicyBank:
         optimizer = self.optimizers[agent_id]
         batch_size = actions.shape[0]
         minibatch_size = min(self.config.ppo_minibatch_size, batch_size)
+        target_kl = float(getattr(self.config, "ppo_target_kl", 0.0) or 0.0)
 
         for _ in range(self.config.ppo_epochs):
             permutation = torch.randperm(batch_size, device=self.device)
+            epoch_kl_values: list[float] = []
             for start in range(0, batch_size, minibatch_size):
                 indices = permutation[start : start + minibatch_size]
                 logits, values = policy(observations[indices])
                 distribution = Categorical(logits=logits)
                 entropy = distribution.entropy().mean()
                 new_log_probs = distribution.log_prob(actions[indices])
-                ratio = torch.exp(new_log_probs - old_log_probs[indices])
+                log_ratio = new_log_probs - old_log_probs[indices]
+                ratio = torch.exp(log_ratio)
                 unclipped = ratio * advantages[indices]
                 clipped = torch.clamp(
                     ratio,
@@ -154,6 +157,13 @@ class PPOPolicyBank:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(policy.parameters(), self.config.ppo_max_grad_norm)
                 optimizer.step()
+                with torch.no_grad():
+                    approx_kl = (ratio - 1.0 - log_ratio).mean().item()
+                epoch_kl_values.append(approx_kl)
+            if target_kl > 0.0 and epoch_kl_values:
+                mean_epoch_kl = sum(epoch_kl_values) / len(epoch_kl_values)
+                if mean_epoch_kl > 1.5 * target_kl:
+                    break
 
     def export_policy_state(self, agent_id: int) -> dict[str, torch.Tensor]:
         state_dict = self.policies[agent_id].state_dict()

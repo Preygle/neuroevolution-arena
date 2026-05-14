@@ -44,10 +44,15 @@ class EvolutionEngine:
         mutated: dict[str, torch.Tensor] = {}
         for name, tensor in state.items():
             clone = tensor.clone()
-            if clone.is_floating_point():
+            if clone.is_floating_point() and self._should_mutate(name):
                 clone += torch.randn_like(clone) * self.config.mutation_std
             mutated[name] = clone
         return mutated
+
+    def _should_mutate(self, parameter_name: str) -> bool:
+        if self.config.mutate_critic:
+            return True
+        return not parameter_name.startswith("critic.")
 
     def _crossover_states(
         self,

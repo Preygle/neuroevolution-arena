@@ -373,15 +373,21 @@ class ArenaEnvironment:
                 self.use_gate_attempts += 1
                 if self._use_gate(agent_id, rewards):
                     return True
+                if self.config.auto_use_gate and self.gate_open:
+                    continue
+                locked_attempt = (
+                    not self.gate_open and self._agent_in_gate_radius(agent_id)
+                )
                 penalty = (
                     self.config.locked_gate_action_penalty
-                    if not self.gate_open and self._agent_in_gate_radius(agent_id)
+                    if locked_attempt
                     else self.config.invalid_gate_action_penalty
                 )
-                if penalty == self.config.locked_gate_action_penalty:
+                if locked_attempt:
                     self.locked_gate_attempt_this_step = True
-                rewards[agent_id] += penalty
-                self.total_reward[agent_id] += penalty
+                if penalty != 0.0:
+                    rewards[agent_id] += penalty
+                    self.total_reward[agent_id] += penalty
                 self.invalid_use_gate_attempts += 1
         if self.config.auto_use_gate and self.gate_open:
             for agent_id in np.flatnonzero(self.alive):

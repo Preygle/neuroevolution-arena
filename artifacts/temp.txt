@@ -9,4 +9,4 @@ py -3 scripts/train.py --generations 10000 --instances 32 --seed 42 --name 32v2 
 
 py -3 scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v3_seed7 --checkpoint-interval 5
 
-py -3 scripts/train.py --generations 10000 --instances 32 --seed 7 --name 32v4_seed7 --checkpoint-interval 5 --discord-interval 1 --discord-video-interval 5
+py -3 scripts/train.py --generations 10000 --instances 64 --seed 7 --name 32v4_seed7 --checkpoint-interval 5 --discord-interval 1 --discord-video-interval 5

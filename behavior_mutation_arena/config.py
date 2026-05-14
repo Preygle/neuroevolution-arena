@@ -55,24 +55,24 @@ class EnemyStats:
 
 
 POWERUP_STATS = {
-    PowerUpType.DAMAGE: PowerUpStats(attack_bonus=2.0, reward=16.0),
-    PowerUpType.RANGE: PowerUpStats(range_bonus=1.0, reward=14.0),
-    PowerUpType.SPEED: PowerUpStats(speed_bonus=1, reward=12.0),
-    PowerUpType.DIAGONAL: PowerUpStats(diagonal_unlocked=True, reward=18.0),
-    PowerUpType.VITALITY: PowerUpStats(vitality_bonus=12.0, reward=14.0),
+    PowerUpType.DAMAGE: PowerUpStats(attack_bonus=2.5, reward=20.0),
+    PowerUpType.RANGE: PowerUpStats(range_bonus=1.0, reward=18.0),
+    PowerUpType.SPEED: PowerUpStats(speed_bonus=1, reward=14.0),
+    PowerUpType.DIAGONAL: PowerUpStats(diagonal_unlocked=True, reward=20.0),
+    PowerUpType.VITALITY: PowerUpStats(vitality_bonus=12.0, reward=16.0),
 }
 
 ENEMY_STATS = {
     EnemyKind.SKIRMISHER: EnemyStats(health=32.0, damage=8.0, attack_range=1, armor=1.0, reward=10.0, aggro_range=10),
     EnemyKind.ARCHER: EnemyStats(health=26.0, damage=6.0, attack_range=3, armor=1.0, reward=10.0, aggro_range=12),
-    EnemyKind.MINI_BOSS: EnemyStats(health=170.0, damage=11.0, attack_range=2, armor=4.0, reward=60.0, aggro_range=8),
-    EnemyKind.FINAL_BOSS: EnemyStats(health=430.0, damage=18.0, attack_range=3, armor=10.0, reward=180.0, aggro_range=10),
+    EnemyKind.MINI_BOSS: EnemyStats(health=120.0, damage=10.0, attack_range=2, armor=2.0, reward=60.0, aggro_range=8),
+    EnemyKind.FINAL_BOSS: EnemyStats(health=340.0, damage=16.0, attack_range=3, armor=6.0, reward=180.0, aggro_range=10),
 }
 
 
 @dataclass
 class ArenaConfig:
-    environment_name: str = "dungeon_crawler_training_v4"
+    environment_name: str = "dungeon_crawler_training_v5"
     grid_size: int = 36
     population_size: int = 5
     num_floors: int = 10
@@ -91,27 +91,27 @@ class ArenaConfig:
     hazard_damage: float = 4.0
     heal_tile_amount: float = 2.0
     floor_transition_heal: float = 10.0
-    attack_base_damage: float = 6.0
+    attack_base_damage: float = 7.0
     attack_damage_reward_scale: float = 0.75
     boss_damage_reward_scale: float = 2.5
     boss_first_hit_reward: float = 25.0
     step_penalty: float = -0.03
     hazard_reward_penalty: float = -0.12
-    gate_distance_reward_scale: float = 1.5
+    gate_distance_reward_scale: float = 0.6
     chest_distance_reward_scale: float = 0.2
     boss_distance_reward_scale: float = 0.35
-    chest_reward: float = 6.0
+    chest_reward: float = 18.0
     gate_reward: float = 65.0
     floor_clear_reward: float = 85.0
     mini_boss_reward: float = 180.0
     final_boss_reward: float = 180.0
     victory_reward: float = 260.0
     death_penalty: float = -12.0
-    powered_agent_death_penalty_scale: float = 3.0
+    powered_agent_death_penalty_scale: float = 0.5
     powered_agent_transition_reward_scale: float = 1.5
     team_wipe_penalty: float = -80.0
-    invalid_gate_action_penalty: float = -1.0
-    locked_gate_action_penalty: float = -4.0
+    invalid_gate_action_penalty: float = 0.0
+    locked_gate_action_penalty: float = -1.0
     no_progress_penalty_interval: int = 12
     no_progress_penalty: float = -4.0
     no_progress_patience: int = 28
@@ -130,10 +130,12 @@ class ArenaConfig:
     ppo_epochs: int = 4
     ppo_minibatch_size: int = 256
     ppo_value_coef: float = 0.5
-    ppo_entropy_coef: float = 0.015
+    ppo_entropy_coef: float = 0.025
     ppo_max_grad_norm: float = 0.5
+    ppo_target_kl: float = 0.02
     elite_fraction: float = 0.3
-    mutation_std: float = 0.015
+    mutation_std: float = 0.008
+    mutate_critic: bool = False
     crossover_rate: float = 0.85
     crossover_swap_probability: float = 0.5
     instance_count: int = 32
