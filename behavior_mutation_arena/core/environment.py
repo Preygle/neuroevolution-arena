@@ -270,6 +270,7 @@ class ArenaEnvironment:
             "gate_position": np.asarray(self.current_floor.gate_position, dtype=np.int16),
             "gate_open": self.gate_open,
             "chest_grid": chest_grid,
+            "opened_chest_positions": tuple(self.opened_chest_positions),
             "enemy_positions": enemy_positions,
             "enemy_kind": enemy_kind,
             "enemy_health": enemy_health,

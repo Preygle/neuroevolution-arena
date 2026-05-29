@@ -26,9 +26,13 @@ This branch replaces that setup with static floors, fixed starts, deterministic 
 - Boss cadence: miniboss on floor `5`, final boss on floor `10`
 - Goal: learn the best chest path, combat pacing, and boss-clear route that leads to a full clear
 
-## Floor gallery
+## Campaign Map
 
-The dungeon is intentionally static so policies can repeatedly practice the same route, risk, and power-up decisions. The floor images below are exported from the same fixed floor definitions used by training.
+The dungeon is intentionally static so policies can repeatedly practice the same route, risk, and power-up decisions. The primary display stitches all ten floors into one continuous campaign map: each next floor entrance is anchored to the previous floor gate.
+
+![Stitched dungeon campaign map](static/floors/stitched_dungeon_map.png)
+
+The individual floor exports are still available for close inspection.
 
 ![All dungeon floors contact sheet](static/floors/all_floors_contact_sheet.png)
 
@@ -258,10 +262,29 @@ Evaluate the saved best policy:
 python scripts/evaluate_checkpoint.py --episodes 5
 ```
 
-Replay the best recorded run:
+Replay the best recorded run from the default artifact folder:
 
 ```powershell
 python scripts/replay_best.py
+```
+
+Replay the best recorded run for a named training folder:
+
+```powershell
+python scripts/replay_best.py --name 32v5_seed7
+```
+
+The replay viewer zooms around the active floor by default so units are readable. Use `--overview` for the full stitched route, or increase/decrease the local context:
+
+```powershell
+python scripts/replay_best.py --name 32v5_seed7 --context-floors 2
+python scripts/replay_best.py --name 32v5_seed7 --overview
+```
+
+List training folders that have a saved best replay:
+
+```powershell
+python scripts/replay_best.py --list-runs
 ```
 
 Rebuild training plots from the CSV log:

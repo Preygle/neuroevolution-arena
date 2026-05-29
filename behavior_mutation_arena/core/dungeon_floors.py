@@ -39,6 +39,21 @@ class DungeonFloor:
     gate_locked_until_boss: bool = False
 
 
+@dataclass(frozen=True)
+class StitchedDungeonLayout:
+    floor_offsets: tuple[tuple[int, int], ...]
+    floor_shape: tuple[int, int]
+    global_shape: tuple[int, int]
+    entrance_anchor: tuple[int, int]
+
+    def floor_offset(self, floor_index: int) -> tuple[int, int]:
+        return self.floor_offsets[floor_index]
+
+    def to_global(self, floor_index: int, position: tuple[int, int]) -> tuple[int, int]:
+        offset_x, offset_y = self.floor_offset(floor_index)
+        return offset_x + position[0], offset_y + position[1]
+
+
 def build_dungeon_floors(grid_size: int) -> list[DungeonFloor]:
     return [
         _verdant_entry(grid_size),
@@ -52,6 +67,45 @@ def build_dungeon_floors(grid_size: int) -> list[DungeonFloor]:
         _inferno_ascent(grid_size),
         _abyss_throne(grid_size),
     ]
+
+
+def build_stitched_dungeon_layout(floors: list[DungeonFloor]) -> StitchedDungeonLayout:
+    if not floors:
+        raise ValueError("at least one dungeon floor is required")
+
+    entrance_anchor = _entrance_anchor(floors[0])
+    offsets: list[tuple[int, int]] = [(0, 0)]
+    for floor_index in range(1, len(floors)):
+        previous_floor = floors[floor_index - 1]
+        previous_offset = offsets[floor_index - 1]
+        current_anchor = _entrance_anchor(floors[floor_index])
+        offsets.append(
+            (
+                previous_offset[0] + previous_floor.gate_position[0] - current_anchor[0],
+                previous_offset[1] + previous_floor.gate_position[1] - current_anchor[1],
+            )
+        )
+
+    min_x = min(offset[0] for offset in offsets)
+    min_y = min(offset[1] for offset in offsets)
+    if min_x < 0 or min_y < 0:
+        offsets = [(x - min_x, y - min_y) for x, y in offsets]
+
+    rows, columns = floors[0].terrain.shape
+    max_x = max(offset[0] + rows for offset in offsets)
+    max_y = max(offset[1] + columns for offset in offsets)
+    return StitchedDungeonLayout(
+        floor_offsets=tuple(offsets),
+        floor_shape=(rows, columns),
+        global_shape=(max_x, max_y),
+        entrance_anchor=entrance_anchor,
+    )
+
+
+def _entrance_anchor(floor: DungeonFloor) -> tuple[int, int]:
+    rows = [position[0] for position in floor.start_positions]
+    columns = [position[1] for position in floor.start_positions]
+    return (round(sum(rows) / len(rows)), round(sum(columns) / len(columns)))
 
 
 def _start_positions() -> tuple[tuple[int, int], ...]:

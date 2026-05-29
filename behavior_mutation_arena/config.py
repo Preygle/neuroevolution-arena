@@ -150,6 +150,9 @@ class ArenaConfig:
     render_max_window_height: int = 1040
     render_cell_size: int = 24
     render_fps: int = 30
+    render_stitched_dungeon: bool = True
+    render_stitched_focus_current: bool = False
+    render_stitched_context_floors: int = 1
     seed: int = 7
     device: str = "cpu"
     auto_use_gate: bool = True
